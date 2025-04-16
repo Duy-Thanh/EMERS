@@ -44,6 +44,8 @@ typedef struct {
     char date[MAX_DATE_LENGTH];
     double sentiment;
     int impactScore;
+    char url[MAX_URL_LENGTH];   /* URL to the news source */
+    time_t timestamp;           /* Timestamp of the event */
 } EventData;
 
 typedef struct {
@@ -197,4 +199,4 @@ bool updateMarketData(const StockData *data, int dataCount);
 #include "technical_analysis.h"
 #include "asm_optimize.h"
 
-#endif /* EMERS_H */ 
+#endif /* EMERS_H */

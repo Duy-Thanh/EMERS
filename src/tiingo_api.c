@@ -9,7 +9,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <math.h>
-#include <process.h>  /* For _popen() */
+#include <process.h>  /* For _popen() on Windows */
 #include <direct.h>   /* For _mkdir() on Windows */
 #include <sys/stat.h> /* For stat() */
 #include <cJSON.h>    /* For JSON parsing */
@@ -18,13 +18,21 @@
 #include "../include/tiingo_api.h"
 #include "../include/error_handling.h"  /* Added error_handling.h for logAPIError */
 
+/* Define SUCCESS constant if not already defined */
+#ifndef SUCCESS
+#define SUCCESS 0
+#endif
+
 /* Define NewsAPI.ai URL and API parameters */
 #define NEWSAPI_API_URL "https://api.newsapi.ai/api/v1/article/getArticles"
 #define NEWSAPI_API_KEY "YOUR_NEWSAPI_AI_KEY"  /* Replace with your actual NewsAPI.ai key */
+#define MAX_NEWS_ITEMS 50
 
 /* Forward declarations of helper functions */
 double calculateSentiment(const char* title, const char* description);
 double calculateImpactScore(const EventData* event);
+void getTempFilePath(char* buffer, size_t bufferSize, const char* filename);
+time_t parseISOTimeString(const char* timeString);
 
 /* Static variables */
 static char apiKey[MAX_API_KEY_LENGTH] = "";
@@ -468,327 +476,277 @@ int parseStockDataJSON(const char* jsonData, StockData* data, int maxItems) {
     return count;
 }
 
-/* Fetch news data using MarketAux API instead of Tiingo News API */
+/**
+ * Fetch news data using MarketAux API instead of Tiingo News API
+ */
 int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     if (!symbols || !events) {
-        logError(ERR_INVALID_PARAMETER, "Invalid parameters for fetchNewsFeed");
-        return 0;
+        logError(ERR_INVALID_PARAMETER, "Invalid parameters passed to fetchNewsFeed");
+        return ERR_INVALID_PARAMETER;
     }
+
+    const char* marketauxKey = getMarketAuxAPIKey();
+    const char* apiKey = getTiingoAPIKey();
     
-    /* Get API key for MarketAux */
-    const char* apiKey = getMarketAuxAPIKey();
-    if (!apiKey || strlen(apiKey) == 0) {
+    if (!marketauxKey || strlen(marketauxKey) < 1) {
         logError(ERR_INVALID_PARAMETER, "MarketAux API key not set");
-        return 0;
+        return ERR_INVALID_PARAMETER;
     }
+
+    char responseBuffer[MAX_BUFFER_SIZE];
+    // First try with marketaux API which is more reliable for news
+    char curlCmd[1024];
+    char tempFilePath[256];
+    getTempFilePath(tempFilePath, sizeof(tempFilePath), "news_response.json");
     
-    /* Build the MarketAux API URL */
-    char url[MAX_URL_LENGTH];
-    snprintf(url, MAX_URL_LENGTH, 
-             "%s?symbols=%s&limit=50&language=en&api_token=%s", 
-             MARKETAUX_API_URL, symbols, apiKey);
+    // Use a simpler curl command without the DNS option that might cause issues
+    snprintf(curlCmd, sizeof(curlCmd),
+        "curl -s -o \"%s\" -w \"%%{http_code}\" "
+        "\"https://api.marketaux.com/v1/news/all?symbols=%s&filter_entities=true&language=en&api_token=%s&limit=50\"",
+        tempFilePath, symbols, marketauxKey);
     
-    /* Perform API request using curl */
-    Memory response;
-    response.data = malloc(1);
-    if (!response.data) {
-        logError(ERR_OUT_OF_MEMORY, "Memory allocation failed for response");
-        return 0;
-    }
-    response.size = 0;
-    response.data[0] = '\0';
-    
-    /* Improved curl command with better options - removed problematic --dns-servers option */
-    char command[MAX_BUFFER_SIZE];
-    snprintf(command, sizeof(command),
-             "curl -s --connect-timeout 30 --max-time 60 --retry 5 --retry-delay 2 --retry-connrefused "
-             "--retry-max-time 120 \"%s\" > curl_output.json 2>curl_error.txt",
-             url);
-    
-    /* Execute curl command */
-    int result = system(command);
-    if (result != 0) {
-        /* Try to read error details from curl_error.txt */
-        FILE* errFp = fopen("curl_error.txt", "r");
-        char errorDetails[256] = "Unknown error";
-        
-        if (errFp) {
-            if (fgets(errorDetails, sizeof(errorDetails), errFp)) {
-                /* Remove newline if present */
-                char* newline = strchr(errorDetails, '\n');
-                if (newline) *newline = '\0';
-            }
-            fclose(errFp);
-        }
-        
-        /* Fall back to a simpler curl command if the first one fails */
-        snprintf(command, sizeof(command),
-                 "curl -s -k --ipv4 --connect-timeout 30 --max-time 60 \"%s\" > curl_output.json",
-                 url);
-        
-        result = system(command);
-        if (result != 0) {
-            logError(ERR_SYSTEM, "Failed to execute curl command. Error code: %d. Details: %s", 
-                    result, errorDetails);
-            free(response.data);
-            return 0;
-        }
-    }
-    
-    /* Read the output file */
-    FILE* fp = fopen("curl_output.json", "rb");
+    char statusCodeStr[8] = {0};
+    FILE* fp = popen(curlCmd, "r");
     if (!fp) {
-        logError(ERR_FILE_OPEN_FAILED, "Failed to open curl output file");
-        free(response.data);
-        return 0;
+        logError(ERR_API_REQUEST_FAILED, "Failed to execute curl command");
+        
+        // Try an even simpler fallback command if the first one fails
+        snprintf(curlCmd, sizeof(curlCmd),
+            "curl -s \"https://api.marketaux.com/v1/news/all?symbols=%s&api_token=%s&limit=10\" -o \"%s\"",
+            symbols, marketauxKey, tempFilePath);
+        
+        system(curlCmd);
+        goto read_response;
     }
     
-    /* Get file size */
-    fseek(fp, 0, SEEK_END);
-    long fileSize = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    
-    if (fileSize <= 0) {
-        logError(ERR_DATA_CORRUPTED, "Empty response from API or failed request");
-        fclose(fp);
-        free(response.data);
-        return 0;
+    if (fgets(statusCodeStr, sizeof(statusCodeStr), fp) == NULL) {
+        pclose(fp);
+        logError(ERR_API_REQUEST_FAILED, "Failed to read curl output");
+        
+        // Try an even simpler fallback command
+        snprintf(curlCmd, sizeof(curlCmd),
+            "curl -s \"https://api.marketaux.com/v1/news/all?symbols=%s&api_token=%s&limit=10\" -o \"%s\"",
+            symbols, marketauxKey, tempFilePath);
+        
+        system(curlCmd);
+        goto read_response;
     }
     
-    /* Allocate memory for response data */
-    char* newData = (char*)realloc(response.data, fileSize + 1);
-    if (!newData) {
-        logError(ERR_OUT_OF_MEMORY, "Memory reallocation failed for response");
-        fclose(fp);
-        free(response.data);
-        return 0;
+    int statusCode = atoi(statusCodeStr);
+    pclose(fp);
+    
+    if (statusCode != 200) {
+        // Log specific error based on status code
+        if (statusCode == 403) {
+            logError(ERR_API_REQUEST_FAILED, "API permission error: Your API key doesn't have access to this feature - URL: https://api.marketaux.com/v1/news/all, Status: %d", statusCode);
+        } else if (statusCode == 429) {
+            logError(ERR_API_REQUEST_FAILED, "API rate limit exceeded - URL: https://api.marketaux.com/v1/news/all, Status: %d", statusCode);
+        } else {
+            logError(ERR_API_REQUEST_FAILED, "API request failed with status code %d - URL: https://api.marketaux.com/v1/news/all", statusCode);
+        }
+        
+        // Try fallback to Tiingo if MarketAux fails
+        if (apiKey && strlen(apiKey) > 0) {
+            snprintf(curlCmd, sizeof(curlCmd),
+                "curl -s \"https://api.tiingo.com/tiingo/news?tickers=%s&limit=50&format=json\" "
+                "-H \"Authorization: Token %s\" -o \"%s\"",
+                symbols, apiKey, tempFilePath);
+            
+            system(curlCmd);
+        } else {
+            // Even if the request failed, let's check if we have a response file with content
+            goto read_response;
+        }
     }
-    response.data = newData;
-    
-    /* Read file content */
-    size_t bytesRead = fread(response.data, 1, fileSize, fp);
-    fclose(fp);
-    
-    if (bytesRead != (size_t)fileSize) {
-        logError(ERR_FILE_READ_FAILED, "Failed to read complete curl output");
-        free(response.data);
-        return 0;
+
+read_response:
+    // Read the response from the temp file
+    FILE* responseFile = fopen(tempFilePath, "r");
+    if (!responseFile) {
+        logError(ERR_FILE_OPEN_FAILED, "Failed to open response file");
+        return ERR_FILE_OPEN_FAILED;
     }
     
-    /* Null-terminate the response data */
-    response.data[bytesRead] = '\0';
-    response.size = bytesRead;
+    size_t bytesRead = fread(responseBuffer, 1, sizeof(responseBuffer) - 1, responseFile);
+    fclose(responseFile);
     
-    /* Check for API errors in the response */
-    if (strstr(response.data, "\"error\"") != NULL) {
-        logError(ERR_API_REQUEST_FAILED, "API returned an error response: %s", response.data);
-        free(response.data);
-        return 0;
+    if (bytesRead == 0) {
+        logError(ERR_DATA_CORRUPTED, "Empty response from API");
+        return ERR_DATA_CORRUPTED;
     }
     
-    /* Parse JSON response using MarketAux format */
-    int success = parseNewsDataJSON(response.data, events->events, events->eventCapacity - events->eventCount);
+    responseBuffer[bytesRead] = '\0';
     
-    /* Update event count */
-    events->eventCount += success;
+    // Verify we got valid JSON by checking for opening brackets
+    if (responseBuffer[0] != '{' && responseBuffer[0] != '[') {
+        logError(ERR_DATA_CORRUPTED, "Invalid JSON response: %s", 
+            strlen(responseBuffer) > 100 ? 
+            "Response too large to display" : responseBuffer);
+        return ERR_DATA_CORRUPTED;
+    }
     
-    /* Clean up */
-    free(response.data);
+    // Parse the news data and add it to the events database
+    int count = parseNewsDataJSON(responseBuffer, events);
     
-    return success;
+    // Return success even with partial data as long as we got at least one item
+    return (count > 0) ? SUCCESS : ERR_DATA_CORRUPTED;
 }
 
-/* Parse JSON response from MarketAux API for news data */
-int parseNewsDataJSON(const char* jsonData, NewsItem* news, int maxItems) {
-    if (!jsonData || !news || maxItems <= 0) {
+/* Parse news data from JSON response (handles both Tiingo and MarketAux formats) */
+int parseNewsDataJSON(const char* jsonData, EventDatabase* events) {
+    if (!jsonData || !events) {
         logError(ERR_INVALID_PARAMETER, "Invalid parameters for parseNewsDataJSON");
         return 0;
     }
 
-    /* Use cJSON to parse the API response */
-    cJSON *json = cJSON_Parse(jsonData);
-    if (!json) {
+    cJSON* root = cJSON_Parse(jsonData);
+    if (!root) {
         const char* errorPtr = cJSON_GetErrorPtr();
         if (errorPtr) {
-            logError(ERR_DATA_CORRUPTED, "JSON parsing error: %s", errorPtr);
+            logError(ERR_DATA_CORRUPTED, "JSON parse error before: %s", errorPtr);
         } else {
-            logError(ERR_DATA_CORRUPTED, "Unknown JSON parsing error");
+            logError(ERR_DATA_CORRUPTED, "JSON parse error at unknown location");
         }
         return 0;
     }
 
-    /* Check if the response is an error message */
-    cJSON *errorObj = cJSON_GetObjectItemCaseSensitive(json, "error");
-    if (cJSON_IsString(errorObj) || cJSON_IsObject(errorObj)) {
-        char errorMsg[256] = "Unknown API error";
-        
-        if (cJSON_IsString(errorObj) && errorObj->valuestring) {
-            snprintf(errorMsg, sizeof(errorMsg), "API error: %s", errorObj->valuestring);
-        }
-        
-        /* Check for specific types of errors */
-        if (strstr(jsonData, "api_token") || strstr(jsonData, "token")) {
-            logError(ERR_API_RESPONSE_INVALID, "API key error in news response: %s", errorMsg);
-        } 
-        else if (strstr(jsonData, "permission") || strstr(jsonData, "unauthorized")) {
-            logError(ERR_API_REQUEST_FAILED, "API permission error: %s", errorMsg);
-        }
-        else {
-            logError(ERR_API_REQUEST_FAILED, "API error: %s", errorMsg);
-        }
-        
-        cJSON_Delete(json);
-        return 0;
-    }
-
-    /* Determine the response structure */
-    cJSON *newsArray = NULL;
-    
-    /* Try to find a news array - could be at root or under a data field */
-    if (cJSON_IsArray(json)) {
-        newsArray = json;
-    } else {
-        /* Check for common fields that might contain the news array */
-        cJSON *dataObj = cJSON_GetObjectItemCaseSensitive(json, "data");
-        if (dataObj && cJSON_IsArray(dataObj)) {
-            newsArray = dataObj;
-        } else {
-            cJSON *articlesObj = cJSON_GetObjectItemCaseSensitive(json, "articles");
-            if (articlesObj && cJSON_IsArray(articlesObj)) {
-                newsArray = articlesObj;
-            } else {
-                cJSON *resultsObj = cJSON_GetObjectItemCaseSensitive(json, "results");
-                if (resultsObj && cJSON_IsArray(resultsObj)) {
-                    newsArray = resultsObj;
-                }
-            }
-        }
-    }
-
-    if (!newsArray) {
-        logError(ERR_DATA_CORRUPTED, "Invalid news JSON format: can't find news array");
-        cJSON_Delete(json);
-        return 0;
-    }
-
-    /* Extract news items */
     int count = 0;
-    int arraySize = cJSON_GetArraySize(newsArray);
     
-    for (int i = 0; i < arraySize && count < maxItems; i++) {
-        cJSON *item = cJSON_GetArrayItem(newsArray, i);
-        if (!cJSON_IsObject(item)) {
-            continue;  /* Skip non-object items */
+    // First, check if this is a MarketAux format (has "data" array at root)
+    cJSON* dataArray = cJSON_GetObjectItem(root, "data");
+    
+    if (dataArray && cJSON_IsArray(dataArray)) {
+        // MarketAux format
+        int dataSize = cJSON_GetArraySize(dataArray);
+        if (dataSize == 0) {
+            logError(ERR_DATA_CORRUPTED, "Empty data array in JSON response");
+            cJSON_Delete(root);
+            return 0;
         }
-
-        /* Extract title */
-        cJSON *titleObj = cJSON_GetObjectItemCaseSensitive(item, "title");
-        if (cJSON_IsString(titleObj) && titleObj->valuestring) {
-            strncpy(news[count].title, titleObj->valuestring, sizeof(news[count].title) - 1);
-            news[count].title[sizeof(news[count].title) - 1] = '\0';
-        } else {
-            /* Try headline if title is not available */
-            cJSON *headlineObj = cJSON_GetObjectItemCaseSensitive(item, "headline");
-            if (cJSON_IsString(headlineObj) && headlineObj->valuestring) {
-                strncpy(news[count].title, headlineObj->valuestring, sizeof(news[count].title) - 1);
-                news[count].title[sizeof(news[count].title) - 1] = '\0';
-            } else {
-                strcpy(news[count].title, "[No Title]");
-            }
-        }
-
-        /* Extract description */
-        cJSON *descObj = cJSON_GetObjectItemCaseSensitive(item, "description");
-        if (cJSON_IsString(descObj) && descObj->valuestring) {
-            strncpy(news[count].description, descObj->valuestring, sizeof(news[count].description) - 1);
-            news[count].description[sizeof(news[count].description) - 1] = '\0';
-        } else {
-            /* Try summary if description is not available */
-            cJSON *summaryObj = cJSON_GetObjectItemCaseSensitive(item, "summary");
-            if (cJSON_IsString(summaryObj) && summaryObj->valuestring) {
-                strncpy(news[count].description, summaryObj->valuestring, sizeof(news[count].description) - 1);
-                news[count].description[sizeof(news[count].description) - 1] = '\0';
-            } else {
-                /* Try snippet if summary is not available */
-                cJSON *snippetObj = cJSON_GetObjectItemCaseSensitive(item, "snippet");
-                if (cJSON_IsString(snippetObj) && snippetObj->valuestring) {
-                    strncpy(news[count].description, snippetObj->valuestring, sizeof(news[count].description) - 1);
-                    news[count].description[sizeof(news[count].description) - 1] = '\0';
+        
+        for (int i = 0; i < dataSize && i < MAX_NEWS_ITEMS; i++) {
+            cJSON* newsItem = cJSON_GetArrayItem(dataArray, i);
+            
+            // Extract fields from MarketAux format
+            cJSON* title = cJSON_GetObjectItem(newsItem, "title");
+            cJSON* description = cJSON_GetObjectItem(newsItem, "description");
+            cJSON* url = cJSON_GetObjectItem(newsItem, "url");
+            cJSON* publishedAt = cJSON_GetObjectItem(newsItem, "published_at");
+            cJSON* sentiment = cJSON_GetObjectItem(newsItem, "sentiment");
+            
+            if (title && cJSON_IsString(title) && 
+                publishedAt && cJSON_IsString(publishedAt)) {
+                
+                EventData event;
+                memset(&event, 0, sizeof(EventData));
+                
+                strncpy(event.title, cJSON_GetStringValue(title), MAX_BUFFER_SIZE - 1);
+                
+                if (description && cJSON_IsString(description)) {
+                    strncpy(event.description, cJSON_GetStringValue(description), MAX_BUFFER_SIZE - 1);
                 } else {
-                    strcpy(news[count].description, "[No Description]");
+                    event.description[0] = '\0';
+                }
+                
+                if (url && cJSON_IsString(url)) {
+                    strncpy(event.url, cJSON_GetStringValue(url), MAX_URL_LENGTH - 1);
+                } else {
+                    event.url[0] = '\0';
+                }
+                
+                // Parse published_at time string (ISO 8601 format)
+                event.timestamp = parseISOTimeString(cJSON_GetStringValue(publishedAt));
+                strftime(event.date, MAX_DATE_LENGTH, "%Y-%m-%d", localtime(&event.timestamp));
+                
+                // Parse sentiment if available
+                if (sentiment && cJSON_IsObject(sentiment)) {
+                    cJSON* sentimentScore = cJSON_GetObjectItem(sentiment, "score");
+                    if (sentimentScore && cJSON_IsNumber(sentimentScore)) {
+                        event.sentiment = (float)cJSON_GetNumberValue(sentimentScore);
+                    } else {
+                        event.sentiment = 0.0f;
+                    }
+                } else {
+                    event.sentiment = 0.0f;
+                }
+                
+                // Calculate impact score
+                event.impactScore = (int)calculateImpactScore(&event);
+                
+                // Add to database
+                if (addEventToDatabase(events, &event)) {
+                    count++;
                 }
             }
         }
-
-        /* Extract published date */
-        cJSON *dateObj = cJSON_GetObjectItemCaseSensitive(item, "published_date");
-        if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
-            /* Try alternate date fields */
-            dateObj = cJSON_GetObjectItemCaseSensitive(item, "publishedDate");
-            if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
-                dateObj = cJSON_GetObjectItemCaseSensitive(item, "date");
-                if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
-                    dateObj = cJSON_GetObjectItemCaseSensitive(item, "datetime");
-                    if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
-                        dateObj = cJSON_GetObjectItemCaseSensitive(item, "created_at");
+    } else {
+        // Try Tiingo format (root is array)
+        if (cJSON_IsArray(root)) {
+            int arraySize = cJSON_GetArraySize(root);
+            if (arraySize == 0) {
+                logError(ERR_DATA_CORRUPTED, "Empty array in JSON response");
+                cJSON_Delete(root);
+                return 0;
+            }
+            
+            for (int i = 0; i < arraySize && i < MAX_NEWS_ITEMS; i++) {
+                cJSON* newsItem = cJSON_GetArrayItem(root, i);
+                
+                // Extract fields from Tiingo format
+                cJSON* title = cJSON_GetObjectItem(newsItem, "title");
+                cJSON* description = cJSON_GetObjectItem(newsItem, "description");
+                cJSON* url = cJSON_GetObjectItem(newsItem, "url");
+                cJSON* publishedDate = cJSON_GetObjectItem(newsItem, "publishedDate");
+                
+                if (title && cJSON_IsString(title) && 
+                    publishedDate && cJSON_IsString(publishedDate)) {
+                    
+                    EventData event;
+                    memset(&event, 0, sizeof(EventData));
+                    
+                    strncpy(event.title, cJSON_GetStringValue(title), MAX_BUFFER_SIZE - 1);
+                    
+                    if (description && cJSON_IsString(description)) {
+                        strncpy(event.description, cJSON_GetStringValue(description), MAX_BUFFER_SIZE - 1);
+                    } else {
+                        event.description[0] = '\0';
+                    }
+                    
+                    if (url && cJSON_IsString(url)) {
+                        strncpy(event.url, cJSON_GetStringValue(url), MAX_URL_LENGTH - 1);
+                    } else {
+                        event.url[0] = '\0';
+                    }
+                    
+                    // Parse published_at time string
+                    event.timestamp = parseISOTimeString(cJSON_GetStringValue(publishedDate));
+                    strftime(event.date, MAX_DATE_LENGTH, "%Y-%m-%d", localtime(&event.timestamp));
+                    
+                    // No sentiment in Tiingo API by default
+                    event.sentiment = 0.0f;
+                    
+                    // Calculate impact score
+                    event.impactScore = (int)calculateImpactScore(&event);
+                    
+                    // Add to database
+                    if (addEventToDatabase(events, &event)) {
+                        count++;
                     }
                 }
             }
-        }
-
-        if (cJSON_IsString(dateObj) && dateObj->valuestring) {
-            strncpy(news[count].date, dateObj->valuestring, sizeof(news[count].date) - 1);
-            news[count].date[sizeof(news[count].date) - 1] = '\0';
         } else {
-            /* Use current date if not available */
-            time_t now = time(NULL);
-            struct tm *timeinfo = localtime(&now);
-            strftime(news[count].date, sizeof(news[count].date), "%Y-%m-%d", timeinfo);
+            logError(ERR_DATA_CORRUPTED, "Invalid JSON format: array not found");
+            cJSON_Delete(root);
+            return 0;
         }
-
-        /* Extract source */
-        cJSON *sourceObj = cJSON_GetObjectItemCaseSensitive(item, "source");
-        if (cJSON_IsString(sourceObj) && sourceObj->valuestring) {
-            strncpy(news[count].source, sourceObj->valuestring, sizeof(news[count].source) - 1);
-            news[count].source[sizeof(news[count].source) - 1] = '\0';
-        } else {
-            /* Check if source is an object with a name field */
-            if (cJSON_IsObject(sourceObj)) {
-                cJSON *sourceNameObj = cJSON_GetObjectItemCaseSensitive(sourceObj, "name");
-                if (cJSON_IsString(sourceNameObj) && sourceNameObj->valuestring) {
-                    strncpy(news[count].source, sourceNameObj->valuestring, sizeof(news[count].source) - 1);
-                    news[count].source[sizeof(news[count].source) - 1] = '\0';
-                } else {
-                    strcpy(news[count].source, "Unknown");
-                }
-            } else {
-                strcpy(news[count].source, "Unknown");
-            }
-        }
-
-        /* Extract URL */
-        cJSON *urlObj = cJSON_GetObjectItemCaseSensitive(item, "url");
-        if (!cJSON_IsString(urlObj) || !urlObj->valuestring) {
-            /* Try alternate URL fields */
-            urlObj = cJSON_GetObjectItemCaseSensitive(item, "link");
-            if (!cJSON_IsString(urlObj) || !urlObj->valuestring) {
-                urlObj = cJSON_GetObjectItemCaseSensitive(item, "web_url");
-            }
-        }
-
-        if (cJSON_IsString(urlObj) && urlObj->valuestring) {
-            strncpy(news[count].url, urlObj->valuestring, sizeof(news[count].url) - 1);
-            news[count].url[sizeof(news[count].url) - 1] = '\0';
-        } else {
-            strcpy(news[count].url, "");
-        }
-
-        count++;
     }
-
-    /* Clean up */
-    cJSON_Delete(json);
-
+    
+    cJSON_Delete(root);
+    
+    if (count == 0) {
+        logError(ERR_DATA_CORRUPTED, "Failed to parse any data points from JSON response");
+    }
+    
     return count;
 }
 
@@ -1042,170 +1000,69 @@ int loadStockDataFromCSV(const char* symbol, const char* startDate, const char* 
     return (stock->dataSize > 0);
 }
 
-/* Fetch historical data with cache support (up to 10 years) */
+/* Fetch historical data with CSV cache */
 int fetchHistoricalDataWithCache(const char* symbol, const char* startDate, const char* endDate, Stock* stock) {
     if (!symbol || !startDate || !endDate || !stock) {
         logError(ERR_INVALID_PARAMETER, "Invalid parameters for fetchHistoricalDataWithCache");
         return 0;
     }
     
-    /* Initialize stock symbol */
+    /* Initialize the stock structure */
     strncpy(stock->symbol, symbol, MAX_SYMBOL_LENGTH - 1);
     stock->symbol[MAX_SYMBOL_LENGTH - 1] = '\0';
+    stock->dataSize = 0;
     
-    /* Check if we already have the data cached */
+    /* Check if data exists in cache */
     if (checkCSVDataExists(symbol, startDate, endDate)) {
-        logMessage(LOG_INFO, "Using cached data for %s (%s to %s)", symbol, startDate, endDate);
+        /* Load data from cache */
+        logMessage(LOG_INFO, "Loading cached data for %s (%s to %s)", symbol, startDate, endDate);
         return loadStockDataFromCSV(symbol, startDate, endDate, stock);
     }
     
-    /* Data not cached, fetch from API */
+    /* Data not in cache, fetch from API */
     logMessage(LOG_INFO, "Fetching data from API for %s (%s to %s)", symbol, startDate, endDate);
+    int success = fetchStockData(symbol, startDate, endDate, stock);
     
-    /* For large date ranges, we may need to break up the request to avoid API limits */
-    /* Most APIs have limits on how much data can be fetched in a single request */
-    
-    /* Parse start and end dates */
-    struct tm start_tm = {0}, end_tm = {0};
-    if (sscanf(startDate, "%d-%d-%d", &start_tm.tm_year, &start_tm.tm_mon, &start_tm.tm_mday) != 3 ||
-        sscanf(endDate, "%d-%d-%d", &end_tm.tm_year, &end_tm.tm_mon, &end_tm.tm_mday) != 3) {
-        logError(ERR_INVALID_PARAMETER, "Invalid date format. Use YYYY-MM-DD");
-        return 0;
+    /* If fetch was successful, save to cache */
+    if (success) {
+        saveStockDataToCSV(stock, startDate, endDate);
     }
     
-    /* Adjust for tm structure (years since 1900, months 0-11) */
-    start_tm.tm_year -= 1900;
-    start_tm.tm_mon -= 1;
-    end_tm.tm_year -= 1900;
-    end_tm.tm_mon -= 1;
+    return success;
+}
+
+/* Get a temporary file path */
+void getTempFilePath(char* buffer, size_t bufferSize, const char* filename) {
+    if (!buffer || bufferSize == 0) return;
     
-    /* Convert to time_t for comparison */
-    time_t start_time = mktime(&start_tm);
-    time_t end_time = mktime(&end_tm);
+    const char* tempDir = getenv("TEMP");
+    if (!tempDir) tempDir = getenv("TMP");
+    if (!tempDir) tempDir = "."; // Use current directory as fallback
     
-    /* Calculate time difference in seconds */
-    double diff = difftime(end_time, start_time);
+    snprintf(buffer, bufferSize, "%s\\%s", tempDir, filename);
+}
+
+/* Parse ISO time string (YYYY-MM-DDTHH:MM:SSZ) to time_t */
+time_t parseISOTimeString(const char* timeString) {
+    if (!timeString || strlen(timeString) < 10) return 0;
     
-    /* If data range is more than 1 year, break into smaller chunks */
-    const double ONE_YEAR_SECONDS = 31536000; /* 365 days */
-    if (diff > ONE_YEAR_SECONDS) {
-        /* For simplicity, we'll fetch in one-year chunks */
-        time_t current_start = start_time;
-        time_t current_end;
-        char current_start_str[MAX_DATE_LENGTH];
-        char current_end_str[MAX_DATE_LENGTH];
-        
-        Stock tempStock;
-        memset(&tempStock, 0, sizeof(Stock));
-        strncpy(tempStock.symbol, symbol, MAX_SYMBOL_LENGTH - 1);
-        tempStock.symbol[MAX_SYMBOL_LENGTH - 1] = '\0';
-        
-        while (current_start < end_time) {
-            /* Calculate current end (one year later or end_time, whichever is earlier) */
-            current_end = current_start + (time_t)ONE_YEAR_SECONDS;
-            if (current_end > end_time) {
-                current_end = end_time;
-            }
-            
-            /* Convert to string format */
-            struct tm* tm_info;
-            tm_info = localtime(&current_start);
-            strftime(current_start_str, MAX_DATE_LENGTH, "%Y-%m-%d", tm_info);
-            
-            tm_info = localtime(&current_end);
-            strftime(current_end_str, MAX_DATE_LENGTH, "%Y-%m-%d", tm_info);
-            
-            /* Fetch this chunk */
-            Stock chunkStock;
-            memset(&chunkStock, 0, sizeof(Stock));
-            strncpy(chunkStock.symbol, symbol, MAX_SYMBOL_LENGTH - 1);
-            chunkStock.symbol[MAX_SYMBOL_LENGTH - 1] = '\0';
-            
-            if (!fetchStockData(symbol, current_start_str, current_end_str, &chunkStock)) {
-                logError(ERR_API_REQUEST_FAILED, "Failed to fetch data chunk for %s (%s to %s)", 
-                        symbol, current_start_str, current_end_str);
-                /* Try to continue with next chunk */
-            } else {
-                /* Add this chunk's data to tempStock */
-                int newDataSize = tempStock.dataSize + chunkStock.dataSize;
-                if (newDataSize > tempStock.dataCapacity) {
-                    /* Need to resize tempStock.data */
-                    int newCapacity = newDataSize + 100; /* Add some extra space */
-                    StockData* newData = (StockData*)realloc(tempStock.data, newCapacity * sizeof(StockData));
-                    if (!newData) {
-                        logError(ERR_OUT_OF_MEMORY, "Failed to reallocate memory for combined stock data");
-                        if (chunkStock.data) free(chunkStock.data);
-                        break;
-                    }
-                    tempStock.data = newData;
-                    tempStock.dataCapacity = newCapacity;
-                }
-                
-                /* Now copy the data from chunkStock to tempStock */
-                if (tempStock.data == NULL) {
-                    tempStock.data = (StockData*)malloc(chunkStock.dataCapacity * sizeof(StockData));
-                    if (!tempStock.data) {
-                        logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for tempStock data");
-                        if (chunkStock.data) free(chunkStock.data);
-                        break;
-                    }
-                    tempStock.dataCapacity = chunkStock.dataCapacity;
-                }
-                
-                /* Copy the data */
-                memcpy(tempStock.data + tempStock.dataSize, chunkStock.data, chunkStock.dataSize * sizeof(StockData));
-                tempStock.dataSize += chunkStock.dataSize;
-                
-                /* Free the chunk data */
-                if (chunkStock.data) free(chunkStock.data);
-            }
-            
-            /* Move to next chunk */
-            current_start = current_end + 86400; /* Add one day (in seconds) */
-        }
-        
-        /* Save the complete dataset to CSV */
-        if (tempStock.dataSize > 0) {
-            saveStockDataToCSV(&tempStock, startDate, endDate);
-            
-            /* Copy data to output stock */
-            if (!stock->data) {
-                stock->data = (StockData*)malloc(tempStock.dataSize * sizeof(StockData));
-                if (!stock->data) {
-                    logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for combined stock data");
-                    free(tempStock.data);
-                    return 0;
-                }
-                stock->dataCapacity = tempStock.dataSize;
-            } else if (stock->dataCapacity < tempStock.dataSize) {
-                StockData* newData = (StockData*)realloc(stock->data, tempStock.dataSize * sizeof(StockData));
-                if (!newData) {
-                    logError(ERR_OUT_OF_MEMORY, "Failed to reallocate memory for combined stock data");
-                    free(tempStock.data);
-                    return 0;
-                }
-                stock->data = newData;
-                stock->dataCapacity = tempStock.dataSize;
-            }
-            
-            memcpy(stock->data, tempStock.data, tempStock.dataSize * sizeof(StockData));
-            stock->dataSize = tempStock.dataSize;
-            
-            free(tempStock.data);
-            return 1;
-        }
-        
-        /* If we got here, we failed to fetch any data */
-        if (tempStock.data) {
-            free(tempStock.data);
-        }
-        return 0;
-    } else {
-        /* For small date ranges, fetch directly and cache the result */
-        if (fetchStockData(symbol, startDate, endDate, stock)) {
-            saveStockDataToCSV(stock, startDate, endDate);
-            return 1;
-        }
-        return 0;
+    struct tm tm = {0};
+    char datePart[11] = {0};
+    
+    // Copy just the date part (YYYY-MM-DD)
+    strncpy(datePart, timeString, 10);
+    datePart[10] = '\0';
+    
+    // Parse date
+    sscanf(datePart, "%d-%d-%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday);
+    tm.tm_year -= 1900; // Adjust year (tm_year is years since 1900)
+    tm.tm_mon -= 1;     // Adjust month (tm_mon is 0-11)
+    
+    // Parse time if available
+    if (strlen(timeString) >= 19) {
+        sscanf(timeString + 11, "%d:%d:%d", &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
     }
+    
+    // Convert to time_t
+    return mktime(&tm);
 }

@@ -30,6 +30,15 @@ typedef struct {
     size_t size;
 } Memory;
 
+/* News item structure for storing news data */
+typedef struct {
+    char title[256];
+    char description[1024];
+    char date[32];
+    char source[64];
+    char url[512];
+} NewsItem;
+
 /* Function prototypes */
 
 /* Initialization and configuration */
@@ -57,7 +66,7 @@ int fetchHistoricalDataWithCache(const char* symbol, const char* startDate, cons
 char* generateCSVFilename(const char* symbol, const char* startDate, const char* endDate);
 
 /* JSON parsing functions */
-int parseStockDataJSON(const char* jsonData, Stock* stock);
+int parseStockDataJSON(const char* jsonData, StockData* data, int maxItems);
 int parseNewsDataJSON(const char* jsonData, EventDatabase* events);
 
 /* Sentiment analysis and impact scoring functions */
