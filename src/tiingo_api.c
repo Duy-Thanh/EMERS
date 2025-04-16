@@ -12,6 +12,7 @@
 #include <process.h>  /* For _popen() */
 #include <direct.h>   /* For _mkdir() on Windows */
 #include <sys/stat.h> /* For stat() */
+#include <cJSON.h>    /* For JSON parsing */
 
 #include "../include/emers.h"
 #include "../include/tiingo_api.h"
@@ -262,12 +263,209 @@ int fetchStockData(const char* symbol, const char* startDate, const char* endDat
     }
     
     /* Parse JSON response */
-    success = parseStockDataJSON(response.data, stock);
+    success = parseStockDataJSON(response.data, stock->data, stock->dataCapacity - stock->dataSize);
     
     /* Clean up */
     free(response.data);
     
     return success;
+}
+
+/* Parse JSON response from Tiingo API for stock data */
+int parseStockDataJSON(const char* jsonData, StockData* data, int maxItems) {
+    if (!jsonData || !data || maxItems <= 0) {
+        logError(ERR_INVALID_PARAMETER, "Invalid parameters for parseStockDataJSON");
+        return 0;
+    }
+
+    /* Use cJSON to parse the API response */
+    cJSON *json = cJSON_Parse(jsonData);
+    if (!json) {
+        const char* errorPtr = cJSON_GetErrorPtr();
+        if (errorPtr) {
+            logError(ERR_DATA_CORRUPTED, "JSON parsing error: %s", errorPtr);
+        } else {
+            logError(ERR_DATA_CORRUPTED, "Unknown JSON parsing error");
+        }
+        return 0;
+    }
+
+    /* Check if the response is an error message or empty */
+    if (cJSON_IsObject(json)) {
+        cJSON *errorObj = cJSON_GetObjectItemCaseSensitive(json, "error");
+        cJSON *messageObj = cJSON_GetObjectItemCaseSensitive(json, "message");
+        
+        if (cJSON_IsString(errorObj) || cJSON_IsString(messageObj)) {
+            char errorMsg[256] = "Unknown API error";
+            
+            if (cJSON_IsString(errorObj) && errorObj->valuestring) {
+                snprintf(errorMsg, sizeof(errorMsg), "API error: %s", errorObj->valuestring);
+            } else if (cJSON_IsString(messageObj) && messageObj->valuestring) {
+                snprintf(errorMsg, sizeof(errorMsg), "API message: %s", messageObj->valuestring);
+            }
+            
+            /* Check for specific types of errors */
+            if (strstr(jsonData, "api_key") || strstr(jsonData, "token")) {
+                logError(ERR_API_RESPONSE_INVALID, "API key error: %s", errorMsg);
+            } 
+            else if (strstr(jsonData, "not found") || strstr(jsonData, "notFound")) {
+                logError(ERR_API_RESPONSE_INVALID, "Ticker not found: %s", errorMsg);
+            }
+            else {
+                logError(ERR_API_REQUEST_FAILED, "API error: %s", errorMsg);
+            }
+            
+            cJSON_Delete(json);
+            return 0;
+        }
+    }
+
+    /* Determine if we're dealing with a single object response or an array */
+    cJSON *priceArray = NULL;
+    
+    if (cJSON_IsArray(json)) {
+        priceArray = json;
+    } else if (cJSON_IsObject(json)) {
+        /* For single ticker responses, the data might be directly in the object */
+        /* First, check if this is a single price object with fields like 'close', 'open', etc. */
+        cJSON *closeObj = cJSON_GetObjectItemCaseSensitive(json, "close");
+        if (cJSON_IsNumber(closeObj)) {
+            /* This appears to be a single price entry - treat as an array of one */
+            priceArray = cJSON_CreateArray();
+            cJSON_AddItemToArray(priceArray, cJSON_Duplicate(json, 1));
+        } else {
+            /* Check for common fields that might contain the price array */
+            cJSON *dataObj = cJSON_GetObjectItemCaseSensitive(json, "data");
+            if (dataObj && cJSON_IsArray(dataObj)) {
+                priceArray = dataObj;
+            } else {
+                cJSON *pricesObj = cJSON_GetObjectItemCaseSensitive(json, "prices");
+                if (pricesObj && cJSON_IsArray(pricesObj)) {
+                    priceArray = pricesObj;
+                } else {
+                    cJSON *resultObj = cJSON_GetObjectItemCaseSensitive(json, "result");
+                    if (resultObj && cJSON_IsArray(resultObj)) {
+                        priceArray = resultObj;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!priceArray) {
+        logError(ERR_DATA_CORRUPTED, "Invalid stock data JSON format: can't find price data");
+        if (priceArray != json) {
+            cJSON_Delete(priceArray);  /* Only delete if we created it */
+        }
+        cJSON_Delete(json);
+        return 0;
+    }
+
+    /* Extract price data */
+    int count = 0;
+    int arraySize = cJSON_GetArraySize(priceArray);
+    
+    for (int i = 0; i < arraySize && count < maxItems; i++) {
+        cJSON *item = cJSON_GetArrayItem(priceArray, i);
+        if (!cJSON_IsObject(item)) {
+            continue;  /* Skip non-object items */
+        }
+        
+        /* Extract date */
+        cJSON *dateObj = cJSON_GetObjectItemCaseSensitive(item, "date");
+        if (!cJSON_IsString(dateObj)) {
+            /* Try alternate date fields */
+            dateObj = cJSON_GetObjectItemCaseSensitive(item, "datetime");
+            if (!cJSON_IsString(dateObj)) {
+                dateObj = cJSON_GetObjectItemCaseSensitive(item, "timestamp");
+            }
+        }
+
+        if (cJSON_IsString(dateObj) && dateObj->valuestring) {
+            strncpy(data[count].date, dateObj->valuestring, sizeof(data[count].date) - 1);
+            data[count].date[sizeof(data[count].date) - 1] = '\0';
+            
+            /* Truncate time part if present */
+            char *timePos = strchr(data[count].date, 'T');
+            if (timePos != NULL) {
+                *timePos = '\0';
+            }
+        } else {
+            /* Use current date if not available */
+            time_t now = time(NULL);
+            struct tm *timeinfo = localtime(&now);
+            strftime(data[count].date, sizeof(data[count].date), "%Y-%m-%d", timeinfo);
+        }
+
+        /* Extract open price */
+        cJSON *openObj = cJSON_GetObjectItemCaseSensitive(item, "open");
+        if (cJSON_IsNumber(openObj)) {
+            data[count].open = (float)openObj->valuedouble;
+        } else {
+            data[count].open = 0.0f;
+        }
+
+        /* Extract high price */
+        cJSON *highObj = cJSON_GetObjectItemCaseSensitive(item, "high");
+        if (cJSON_IsNumber(highObj)) {
+            data[count].high = (float)highObj->valuedouble;
+        } else {
+            data[count].high = 0.0f;
+        }
+
+        /* Extract low price */
+        cJSON *lowObj = cJSON_GetObjectItemCaseSensitive(item, "low");
+        if (cJSON_IsNumber(lowObj)) {
+            data[count].low = (float)lowObj->valuedouble;
+        } else {
+            data[count].low = 0.0f;
+        }
+
+        /* Extract close price */
+        cJSON *closeObj = cJSON_GetObjectItemCaseSensitive(item, "close");
+        if (cJSON_IsNumber(closeObj)) {
+            data[count].close = (float)closeObj->valuedouble;
+        } else {
+            data[count].close = 0.0f;
+        }
+
+        /* Extract volume */
+        cJSON *volumeObj = cJSON_GetObjectItemCaseSensitive(item, "volume");
+        if (cJSON_IsNumber(volumeObj)) {
+            data[count].volume = (long)volumeObj->valuedouble;
+        } else {
+            data[count].volume = 0;
+        }
+
+        /* Extract adjusted close if available */
+        cJSON *adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjClose");
+        if (!cJSON_IsNumber(adjCloseObj)) {
+            adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjclose");
+            if (!cJSON_IsNumber(adjCloseObj)) {
+                adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjusted_close");
+                if (!cJSON_IsNumber(adjCloseObj)) {
+                    adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjustedClose");
+                }
+            }
+        }
+
+        if (cJSON_IsNumber(adjCloseObj)) {
+            data[count].adjClose = (float)adjCloseObj->valuedouble;
+        } else {
+            /* If adjusted close is not available, use regular close */
+            data[count].adjClose = data[count].close;
+        }
+
+        count++;
+    }
+
+    /* Clean up */
+    if (priceArray != json && priceArray != NULL) {
+        cJSON_Delete(priceArray);  /* Only delete if we created it */
+    }
+    cJSON_Delete(json);
+
+    return count;
 }
 
 /* Fetch news data using MarketAux API instead of Tiingo News API */
@@ -300,13 +498,11 @@ int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     response.size = 0;
     response.data[0] = '\0';
     
-    /* Build curl command with proper parameters for MarketAux */
+    /* Improved curl command with better options - removed problematic --dns-servers option */
     char command[MAX_BUFFER_SIZE];
-    
-    /* Improve curl command with more options to handle network issues */
     snprintf(command, sizeof(command),
              "curl -s --connect-timeout 30 --max-time 60 --retry 5 --retry-delay 2 --retry-connrefused "
-             "--retry-max-time 120 --dns-servers 8.8.8.8,1.1.1.1 \"%s\" > curl_output.json 2>curl_error.txt",
+             "--retry-max-time 120 \"%s\" > curl_output.json 2>curl_error.txt",
              url);
     
     /* Execute curl command */
@@ -391,7 +587,10 @@ int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     }
     
     /* Parse JSON response using MarketAux format */
-    int success = parseNewsDataJSON(response.data, events);
+    int success = parseNewsDataJSON(response.data, events->events, events->eventCapacity - events->eventCount);
+    
+    /* Update event count */
+    events->eventCount += success;
     
     /* Clean up */
     free(response.data);
@@ -399,433 +598,198 @@ int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     return success;
 }
 
-/* Parse stock data JSON response */
-int parseStockDataJSON(const char* jsonData, Stock* stock) {
-    if (!jsonData || !stock) {
-        logError(ERR_INVALID_PARAMETER, "Invalid parameters for parseStockDataJSON");
-        return 0;
-    }
-    
-    /* Initialize stock data array if needed */
-    if (!stock->data) {
-        stock->dataCapacity = 4000; /* Initial capacity for 10+ years of data */
-        stock->data = (StockData*)malloc(stock->dataCapacity * sizeof(StockData));
-        if (!stock->data) {
-            logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for stock data");
-            return 0;
-        }
-        stock->dataSize = 0;
-    }
-    
-    /* Simple JSON parser for Tiingo API response format */
-    /* Format: [{"date":"2025-04-16", "open":123.45, "high":125.67, ...}, {...}, ...] */
-    
-    /* Find the beginning of the array */
-    const char* pos = strchr(jsonData, '[');
-    if (!pos) {
-        logError(ERR_DATA_CORRUPTED, "Invalid JSON format: array not found");
-        return 0;
-    }
-    
-    /* Iterate through each object in the array */
-    while ((pos = strstr(pos, "{"))) {
-        /* Check if we need to resize the array */
-        if (stock->dataSize >= stock->dataCapacity) {
-            stock->dataCapacity *= 2;
-            StockData* newData = (StockData*)realloc(stock->data, stock->dataCapacity * sizeof(StockData));
-            if (!newData) {
-                logError(ERR_OUT_OF_MEMORY, "Memory reallocation failed for stock data");
-                return 0;
-            }
-            stock->data = newData;
-        }
-        
-        /* Parse each field of the object */
-        StockData* dataPoint = &stock->data[stock->dataSize];
-        
-        /* Extract date */
-        const char* dateStart = strstr(pos, "\"date\"");
-        if (!dateStart) break;
-        dateStart = strchr(dateStart, ':');
-        if (!dateStart) break;
-        dateStart = strchr(dateStart, '"');
-        if (!dateStart) break;
-        dateStart++;
-        const char* dateEnd = strchr(dateStart, '"');
-        if (!dateEnd || (dateEnd - dateStart) >= MAX_DATE_LENGTH) break;
-        memcpy(dataPoint->date, dateStart, dateEnd - dateStart);
-        dataPoint->date[dateEnd - dateStart] = '\0';
-        
-        /* Extract open price */
-        const char* openStart = strstr(pos, "\"open\"");
-        if (!openStart) break;
-        openStart = strchr(openStart, ':');
-        if (!openStart) break;
-        dataPoint->open = strtod(openStart + 1, NULL);
-        
-        /* Extract high price */
-        const char* highStart = strstr(pos, "\"high\"");
-        if (!highStart) break;
-        highStart = strchr(highStart, ':');
-        if (!highStart) break;
-        dataPoint->high = strtod(highStart + 1, NULL);
-        
-        /* Extract low price */
-        const char* lowStart = strstr(pos, "\"low\"");
-        if (!lowStart) break;
-        lowStart = strchr(lowStart, ':');
-        if (!lowStart) break;
-        dataPoint->low = strtod(lowStart + 1, NULL);
-        
-        /* Extract close price */
-        const char* closeStart = strstr(pos, "\"close\"");
-        if (!closeStart) break;
-        closeStart = strchr(closeStart, ':');
-        if (!closeStart) break;
-        dataPoint->close = strtod(closeStart + 1, NULL);
-        
-        /* Extract volume */
-        const char* volStart = strstr(pos, "\"volume\"");
-        if (!volStart) break;
-        volStart = strchr(volStart, ':');
-        if (!volStart) break;
-        dataPoint->volume = strtod(volStart + 1, NULL);
-        
-        /* Extract adjusted close (may be named "adjClose" or "adjClose") */
-        const char* adjCloseStart = strstr(pos, "\"adjClose\"");
-        if (!adjCloseStart) {
-            adjCloseStart = strstr(pos, "\"adjClose\"");
-        }
-        if (adjCloseStart) {
-            adjCloseStart = strchr(adjCloseStart, ':');
-            if (adjCloseStart) {
-                dataPoint->adjClose = strtod(adjCloseStart + 1, NULL);
-            } else {
-                dataPoint->adjClose = dataPoint->close; /* Use close if adjClose not available */
-            }
-        } else {
-            dataPoint->adjClose = dataPoint->close; /* Use close if adjClose not available */
-        }
-        
-        /* Move to the next record */
-        stock->dataSize++;
-        pos = strchr(pos, '}');
-        if (!pos) break;
-    }
-    
-    if (stock->dataSize == 0) {
-        logError(ERR_DATA_CORRUPTED, "Failed to parse any data points from JSON response");
-        return 0;
-    }
-    
-    logMessage(LOG_INFO, "Successfully parsed %d data points from JSON response", stock->dataSize);
-    return 1;
-}
-
 /* Parse JSON response from MarketAux API for news data */
-int parseNewsDataJSON(const char* jsonData, EventDatabase* events) {
-    if (!jsonData || !events) {
+int parseNewsDataJSON(const char* jsonData, NewsItem* news, int maxItems) {
+    if (!jsonData || !news || maxItems <= 0) {
         logError(ERR_INVALID_PARAMETER, "Invalid parameters for parseNewsDataJSON");
         return 0;
     }
 
-    /* Check for API errors in MarketAux response */
-    if (strstr(jsonData, "\"error\"") || strstr(jsonData, "\"errors\"")) {
-        /* Check for common API errors */
+    /* Use cJSON to parse the API response */
+    cJSON *json = cJSON_Parse(jsonData);
+    if (!json) {
+        const char* errorPtr = cJSON_GetErrorPtr();
+        if (errorPtr) {
+            logError(ERR_DATA_CORRUPTED, "JSON parsing error: %s", errorPtr);
+        } else {
+            logError(ERR_DATA_CORRUPTED, "Unknown JSON parsing error");
+        }
+        return 0;
+    }
+
+    /* Check if the response is an error message */
+    cJSON *errorObj = cJSON_GetObjectItemCaseSensitive(json, "error");
+    if (cJSON_IsString(errorObj) || cJSON_IsObject(errorObj)) {
+        char errorMsg[256] = "Unknown API error";
+        
+        if (cJSON_IsString(errorObj) && errorObj->valuestring) {
+            snprintf(errorMsg, sizeof(errorMsg), "API error: %s", errorObj->valuestring);
+        }
+        
+        /* Check for specific types of errors */
         if (strstr(jsonData, "api_token") || strstr(jsonData, "token")) {
-            logError(ERR_API_RESPONSE_INVALID, "API key error in MarketAux response: %s", jsonData);
+            logError(ERR_API_RESPONSE_INVALID, "API key error in news response: %s", errorMsg);
         } 
         else if (strstr(jsonData, "permission") || strstr(jsonData, "unauthorized")) {
-            logError(ERR_API_REQUEST_FAILED, "API permission error: %s", jsonData);
-        }
-        else if (strstr(jsonData, "limit") || strstr(jsonData, "quota")) {
-            logError(ERR_API_REQUEST_FAILED, "API rate limit reached: %s", jsonData);
+            logError(ERR_API_REQUEST_FAILED, "API permission error: %s", errorMsg);
         }
         else {
-            logError(ERR_API_REQUEST_FAILED, "Unknown API error: %s", jsonData);
+            logError(ERR_API_REQUEST_FAILED, "API error: %s", errorMsg);
         }
+        
+        cJSON_Delete(json);
         return 0;
     }
 
-    /* Look for the data array in MarketAux response format */
-    const char* dataStart = strstr(jsonData, "\"data\"");
-    if (!dataStart) {
-        logError(ERR_DATA_CORRUPTED, "Invalid MarketAux JSON format: 'data' field not found");
-        return 0;
-    }
-
-    /* Find the array start */
-    const char* arrayStart = strchr(dataStart, '[');
-    if (!arrayStart) {
-        logError(ERR_DATA_CORRUPTED, "Invalid MarketAux JSON format: array not found");
-        return 0;
-    }
-
-    /* Count how many objects we have */
-    int objectCount = 0;
-    const char* pos = arrayStart;
-    while ((pos = strstr(pos + 1, "{"))) {
-        objectCount++;
-    }
-
-    if (objectCount == 0) {
-        /* No news articles found, but not an error */
-        return 1;
-    }
-
-    /* Ensure enough capacity in the events database */
-    if (events->eventCount + objectCount > events->eventCapacity) {
-        int newCapacity = events->eventCapacity + objectCount + 10;  /* Add some extra */
-        EventData* newEvents = realloc(events->events, newCapacity * sizeof(EventData));
-        if (!newEvents) {
-            logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for news events");
-            return 0;
-        }
-        events->events = newEvents;
-        events->eventCapacity = newCapacity;
-    }
-
-    /* Process each object */
-    int count = 0;
-    pos = arrayStart;
+    /* Determine the response structure */
+    cJSON *newsArray = NULL;
     
-    while (count < objectCount) {
-        /* Find start of object */
-        const char* objStart = strstr(pos, "{");
-        if (!objStart) break;
-        
-        /* Find end of object - handle nested objects properly */
-        const char* objEnd = NULL;
-        int braceCount = 1;
-        for (const char* c = objStart + 1; *c; c++) {
-            if (*c == '{') braceCount++;
-            else if (*c == '}') {
-                braceCount--;
-                if (braceCount == 0) {
-                    objEnd = c;
-                    break;
-                }
-            }
-        }
-        
-        if (!objEnd) break;
-        
-        /* Process this object/article */
-        EventData* event = &events->events[events->eventCount];
-        memset(event, 0, sizeof(EventData));
-        
-        /* Extract date from "published_at" field in MarketAux format */
-        const char* publishedField = strstr(objStart, "\"published_at\"");
-        if (publishedField) {
-            const char* datePos = strchr(publishedField, ':');
-            if (datePos) {
-                datePos = strchr(datePos, '"');
-                if (datePos) {
-                    datePos++; /* Skip first quote */
-                    int i = 0;
-                    while (datePos[i] && datePos[i] != '"' && i < (int)(sizeof(event->date) - 1)) {
-                        /* Only copy the date part (up to 10 chars) */
-                        if (i < 10) {
-                            event->date[i] = datePos[i];
-                        }
-                        i++;
-                    }
-                    event->date[10] = '\0'; /* Ensure we only store the date part */
-                }
-            }
-        }
-        
-        /* Extract title from MarketAux format */
-        const char* titleField = strstr(objStart, "\"title\"");
-        if (titleField) {
-            const char* titlePos = strchr(titleField, ':');
-            if (titlePos) {
-                titlePos = strchr(titlePos, '"');
-                if (titlePos) {
-                    titlePos++; /* Skip first quote */
-                    int i = 0;
-                    while (titlePos[i] && titlePos[i] != '"' && i < (int)(sizeof(event->title) - 1)) {
-                        event->title[i] = titlePos[i];
-                        i++;
-                    }
-                    event->title[i] = '\0';
-                }
-            }
-        }
-        
-        /* Extract description from "description" field in MarketAux format */
-        const char* descField = strstr(objStart, "\"description\"");
-        if (descField) {
-            const char* descPos = strchr(descField, ':');
-            if (descPos) {
-                descPos = strchr(descPos, '"');
-                if (descPos) {
-                    descPos++; /* Skip first quote */
-                    int i = 0;
-                    while (descPos[i] && descPos[i] != '"' && i < (int)(sizeof(event->description) - 1)) {
-                        event->description[i] = descPos[i];
-                        i++;
-                    }
-                    event->description[i] = '\0';
-                }
-            }
-        }
-        
-        /* Extract source information from MarketAux format */
-        const char* sourceField = strstr(objStart, "\"source\"");
-        if (sourceField) {
-            const char* sourceNameField = strstr(sourceField, "\"name\"");
-            if (sourceNameField) {
-                const char* namePos = strchr(sourceNameField, ':');
-                if (namePos) {
-                    namePos = strchr(namePos, '"');
-                    if (namePos) {
-                        namePos++; /* Skip first quote */
-                        
-                        /* Create a source prefix to add to title */
-                        char sourcePrefix[MAX_BUFFER_SIZE/2] = {0};
-                        int i = 0;
-                        while (namePos[i] && namePos[i] != '"' && i < (int)(sizeof(sourcePrefix) - 10)) {
-                            sourcePrefix[i] = namePos[i];
-                            i++;
-                        }
-                        sourcePrefix[i] = '\0';
-                        
-                        /* Prepend source to title if we have both */
-                        if (sourcePrefix[0] && event->title[0]) {
-                            char tempTitle[MAX_BUFFER_SIZE] = {0};
-                            snprintf(tempTitle, sizeof(tempTitle), "[%s] %s", sourcePrefix, event->title);
-                            strncpy(event->title, tempTitle, sizeof(event->title) - 1);
-                            event->title[sizeof(event->title) - 1] = '\0';
-                        }
-                    }
-                }
-            }
-        }
-        
-        /* Extract URL from MarketAux format */
-        const char* urlField = strstr(objStart, "\"url\"");
-        if (urlField) {
-            const char* urlPos = strchr(urlField, ':');
-            if (urlPos) {
-                urlPos = strchr(urlPos, '"');
-                if (urlPos) {
-                    urlPos++; /* Skip first quote */
-                    
-                    /* Extract the URL into a temp buffer */
-                    char urlBuffer[MAX_BUFFER_SIZE/2] = {0};
-                    int i = 0;
-                    while (urlPos[i] && urlPos[i] != '"' && i < (int)(sizeof(urlBuffer) - 1)) {
-                        urlBuffer[i] = urlPos[i];
-                        i++;
-                    }
-                    urlBuffer[i] = '\0';
-                    
-                    /* If we have room, append URL to description */
-                    if (strlen(event->description) + strlen(urlBuffer) + 10 < sizeof(event->description)) {
-                        strcat(event->description, "\nSource URL: ");
-                        strcat(event->description, urlBuffer);
-                    }
-                }
-            }
-        }
-        
-        /* Extract symbols/tickers mentioned in the news from MarketAux format */
-        const char* entitiesField = strstr(objStart, "\"entities\"");
-        if (entitiesField) {
-            const char* symbolsStart = strstr(entitiesField, "\"symbols\"");
-            if (symbolsStart) {
-                /* Find symbols array start */
-                const char* symbolsArray = strchr(symbolsStart, '[');
-                if (symbolsArray) {
-                    char symbolsBuffer[256] = {0};
-                    const char* symbolName;
-                    const char* symbolEnd;
-                    const char* symbolPos = symbolsArray;
-                    int symbolsAdded = 0;
-                    
-                    /* Iterate through symbols array */
-                    while ((symbolName = strstr(symbolPos, "\"name\"")) && symbolsAdded < 5) {
-                        symbolName = strchr(symbolName, ':');
-                        if (!symbolName) break;
-                        symbolName = strchr(symbolName, '"');
-                        if (!symbolName) break;
-                        symbolName++; /* Skip first quote */
-                        
-                        symbolEnd = strchr(symbolName, '"');
-                        if (!symbolEnd) break;
-                        
-                        /* Add symbol to our buffer with separator */
-                        if (symbolsAdded > 0) {
-                            strcat(symbolsBuffer, ", ");
-                        }
-                        
-                        /* Copy symbol name */
-                        int nameLen = symbolEnd - symbolName;
-                        strncat(symbolsBuffer, symbolName, nameLen > 10 ? 10 : nameLen);
-                        
-                        symbolsAdded++;
-                        symbolPos = symbolEnd + 1;
-                    }
-                    
-                    /* If we found symbols, add them to the event description */
-                    if (symbolsBuffer[0]) {
-                        char symbolsInfo[300];
-                        snprintf(symbolsInfo, sizeof(symbolsInfo), "\nMentioned symbols: %s", symbolsBuffer);
-                        
-                        if (strlen(event->description) + strlen(symbolsInfo) < sizeof(event->description)) {
-                            strcat(event->description, symbolsInfo);
-                        }
-                    }
-                }
-            }
-        }
-        
-        /* Extract sentiment information from MarketAux if available */
-        const char* sentimentField = strstr(objStart, "\"sentiment\"");
-        if (sentimentField) {
-            /* Try to get the sentiment score directly from MarketAux */
-            const char* scoreField = strstr(sentimentField, "\"score\"");
-            if (scoreField) {
-                const char* scorePos = strchr(scoreField, ':');
-                if (scorePos) {
-                    double marketauxSentiment = strtod(scorePos + 1, NULL);
-                    /* MarketAux sentiment is typically 0 to 1, scale to our -1 to 1 range */
-                    event->sentiment = (marketauxSentiment - 0.5) * 2.0;
-                }
-            }
+    /* Try to find a news array - could be at root or under a data field */
+    if (cJSON_IsArray(json)) {
+        newsArray = json;
+    } else {
+        /* Check for common fields that might contain the news array */
+        cJSON *dataObj = cJSON_GetObjectItemCaseSensitive(json, "data");
+        if (dataObj && cJSON_IsArray(dataObj)) {
+            newsArray = dataObj;
         } else {
-            /* Fall back to our own sentiment analysis if MarketAux doesn't provide it */
-            event->sentiment = calculateSentiment(event->title, event->description);
-        }
-        
-        /* Calculate impact score */
-        event->impactScore = calculateImpactScore(event);
-        
-        /* Check if it's a major news source to adjust the score */
-        const char* majorSources[] = {"Bloomberg", "Reuters", "CNBC", "WSJ", "Barron", "Forbes", "MarketWatch"};
-        for (int i = 0; i < (int)(sizeof(majorSources) / sizeof(majorSources[0])); i++) {
-            if (strstr(event->title, majorSources[i])) {
-                /* Major sources get a boost in impact score */
-                event->impactScore += 2;
-                break;
+            cJSON *articlesObj = cJSON_GetObjectItemCaseSensitive(json, "articles");
+            if (articlesObj && cJSON_IsArray(articlesObj)) {
+                newsArray = articlesObj;
+            } else {
+                cJSON *resultsObj = cJSON_GetObjectItemCaseSensitive(json, "results");
+                if (resultsObj && cJSON_IsArray(resultsObj)) {
+                    newsArray = resultsObj;
+                }
             }
         }
-        
-        /* Clamp impact score to reasonable range */
-        if (event->impactScore > 10) event->impactScore = 10;
-        if (event->impactScore < 0) event->impactScore = 0;
-        
-        /* Add to event database */
-        events->eventCount++;
-        count++;
-        
-        /* Move to next position */
-        pos = objEnd + 1;
     }
+
+    if (!newsArray) {
+        logError(ERR_DATA_CORRUPTED, "Invalid news JSON format: can't find news array");
+        cJSON_Delete(json);
+        return 0;
+    }
+
+    /* Extract news items */
+    int count = 0;
+    int arraySize = cJSON_GetArraySize(newsArray);
     
-    /* Return success if we processed at least one event */
-    return count > 0;
+    for (int i = 0; i < arraySize && count < maxItems; i++) {
+        cJSON *item = cJSON_GetArrayItem(newsArray, i);
+        if (!cJSON_IsObject(item)) {
+            continue;  /* Skip non-object items */
+        }
+
+        /* Extract title */
+        cJSON *titleObj = cJSON_GetObjectItemCaseSensitive(item, "title");
+        if (cJSON_IsString(titleObj) && titleObj->valuestring) {
+            strncpy(news[count].title, titleObj->valuestring, sizeof(news[count].title) - 1);
+            news[count].title[sizeof(news[count].title) - 1] = '\0';
+        } else {
+            /* Try headline if title is not available */
+            cJSON *headlineObj = cJSON_GetObjectItemCaseSensitive(item, "headline");
+            if (cJSON_IsString(headlineObj) && headlineObj->valuestring) {
+                strncpy(news[count].title, headlineObj->valuestring, sizeof(news[count].title) - 1);
+                news[count].title[sizeof(news[count].title) - 1] = '\0';
+            } else {
+                strcpy(news[count].title, "[No Title]");
+            }
+        }
+
+        /* Extract description */
+        cJSON *descObj = cJSON_GetObjectItemCaseSensitive(item, "description");
+        if (cJSON_IsString(descObj) && descObj->valuestring) {
+            strncpy(news[count].description, descObj->valuestring, sizeof(news[count].description) - 1);
+            news[count].description[sizeof(news[count].description) - 1] = '\0';
+        } else {
+            /* Try summary if description is not available */
+            cJSON *summaryObj = cJSON_GetObjectItemCaseSensitive(item, "summary");
+            if (cJSON_IsString(summaryObj) && summaryObj->valuestring) {
+                strncpy(news[count].description, summaryObj->valuestring, sizeof(news[count].description) - 1);
+                news[count].description[sizeof(news[count].description) - 1] = '\0';
+            } else {
+                /* Try snippet if summary is not available */
+                cJSON *snippetObj = cJSON_GetObjectItemCaseSensitive(item, "snippet");
+                if (cJSON_IsString(snippetObj) && snippetObj->valuestring) {
+                    strncpy(news[count].description, snippetObj->valuestring, sizeof(news[count].description) - 1);
+                    news[count].description[sizeof(news[count].description) - 1] = '\0';
+                } else {
+                    strcpy(news[count].description, "[No Description]");
+                }
+            }
+        }
+
+        /* Extract published date */
+        cJSON *dateObj = cJSON_GetObjectItemCaseSensitive(item, "published_date");
+        if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
+            /* Try alternate date fields */
+            dateObj = cJSON_GetObjectItemCaseSensitive(item, "publishedDate");
+            if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
+                dateObj = cJSON_GetObjectItemCaseSensitive(item, "date");
+                if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
+                    dateObj = cJSON_GetObjectItemCaseSensitive(item, "datetime");
+                    if (!cJSON_IsString(dateObj) || !dateObj->valuestring) {
+                        dateObj = cJSON_GetObjectItemCaseSensitive(item, "created_at");
+                    }
+                }
+            }
+        }
+
+        if (cJSON_IsString(dateObj) && dateObj->valuestring) {
+            strncpy(news[count].date, dateObj->valuestring, sizeof(news[count].date) - 1);
+            news[count].date[sizeof(news[count].date) - 1] = '\0';
+        } else {
+            /* Use current date if not available */
+            time_t now = time(NULL);
+            struct tm *timeinfo = localtime(&now);
+            strftime(news[count].date, sizeof(news[count].date), "%Y-%m-%d", timeinfo);
+        }
+
+        /* Extract source */
+        cJSON *sourceObj = cJSON_GetObjectItemCaseSensitive(item, "source");
+        if (cJSON_IsString(sourceObj) && sourceObj->valuestring) {
+            strncpy(news[count].source, sourceObj->valuestring, sizeof(news[count].source) - 1);
+            news[count].source[sizeof(news[count].source) - 1] = '\0';
+        } else {
+            /* Check if source is an object with a name field */
+            if (cJSON_IsObject(sourceObj)) {
+                cJSON *sourceNameObj = cJSON_GetObjectItemCaseSensitive(sourceObj, "name");
+                if (cJSON_IsString(sourceNameObj) && sourceNameObj->valuestring) {
+                    strncpy(news[count].source, sourceNameObj->valuestring, sizeof(news[count].source) - 1);
+                    news[count].source[sizeof(news[count].source) - 1] = '\0';
+                } else {
+                    strcpy(news[count].source, "Unknown");
+                }
+            } else {
+                strcpy(news[count].source, "Unknown");
+            }
+        }
+
+        /* Extract URL */
+        cJSON *urlObj = cJSON_GetObjectItemCaseSensitive(item, "url");
+        if (!cJSON_IsString(urlObj) || !urlObj->valuestring) {
+            /* Try alternate URL fields */
+            urlObj = cJSON_GetObjectItemCaseSensitive(item, "link");
+            if (!cJSON_IsString(urlObj) || !urlObj->valuestring) {
+                urlObj = cJSON_GetObjectItemCaseSensitive(item, "web_url");
+            }
+        }
+
+        if (cJSON_IsString(urlObj) && urlObj->valuestring) {
+            strncpy(news[count].url, urlObj->valuestring, sizeof(news[count].url) - 1);
+            news[count].url[sizeof(news[count].url) - 1] = '\0';
+        } else {
+            strcpy(news[count].url, "");
+        }
+
+        count++;
+    }
+
+    /* Clean up */
+    cJSON_Delete(json);
+
+    return count;
 }
 
 /* Calculate sentiment score for a news event based on title and description */
