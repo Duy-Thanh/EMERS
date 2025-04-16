@@ -63,16 +63,6 @@ typedef struct {
     double bollingerMiddle;
     double bollingerLower;
     double atr;       // Average True Range
-    double adx;       // Average Directional Index
-    double eventAdjustedADX; // Event-Adjusted ADX
-    double stochasticK; // Stochastic Oscillator %K Line
-    double stochasticD; // Stochastic Oscillator %D Line
-    double eventAdjustedStochasticK; // Event-Adjusted Stochastic %K
-    double eventAdjustedStochasticD; // Event-Adjusted Stochastic %D
-    double mfi;       // Money Flow Index
-    double eventAdjustedMFI; // Event-Adjusted MFI
-    double psar;      // Parabolic SAR
-    double eventAdjustedPSAR; // Event-Adjusted PSAR
 } TechnicalIndicators;
 
 /**
@@ -207,4 +197,4 @@ bool updateMarketData(const StockData *data, int dataCount);
 #include "technical_analysis.h"
 #include "asm_optimize.h"
 
-#endif /* EMERS_H */
+#endif /* EMERS_H */ 

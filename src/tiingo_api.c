@@ -3,10 +3,12 @@
  * Implementation file for Tiingo API functions
  */
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <time.h>
+#include <ctype.h>
+#include <math.h>
 #include <process.h>  /* For _popen() */
 #include <direct.h>   /* For _mkdir() on Windows */
 #include <sys/stat.h> /* For stat() */
@@ -15,8 +17,17 @@
 #include "../include/tiingo_api.h"
 #include "../include/error_handling.h"  /* Added error_handling.h for logAPIError */
 
+/* Define NewsAPI.ai URL and API parameters */
+#define NEWSAPI_API_URL "https://api.newsapi.ai/api/v1/article/getArticles"
+#define NEWSAPI_API_KEY "YOUR_NEWSAPI_AI_KEY"  /* Replace with your actual NewsAPI.ai key */
+
+/* Forward declarations of helper functions */
+double calculateSentiment(const char* title, const char* description);
+double calculateImpactScore(const EventData* event);
+
 /* Static variables */
 static char apiKey[MAX_API_KEY_LENGTH] = "";
+static char marketauxApiKey[MARKETAUX_API_KEY_LENGTH] = "";
 static int isInitialized = 0;
 
 /* Initialize the Tiingo API */
@@ -77,6 +88,19 @@ void setTiingoAPIKey(const char* key) {
 /* Get the Tiingo API key */
 const char* getTiingoAPIKey(void) {
     return apiKey;
+}
+
+/* Set the MarketAux API key */
+void setMarketAuxAPIKey(const char* key) {
+    if (key && strlen(key) > 0) {
+        strncpy(marketauxApiKey, key, MARKETAUX_API_KEY_LENGTH - 1);
+        marketauxApiKey[MARKETAUX_API_KEY_LENGTH - 1] = '\0';
+    }
+}
+
+/* Get the MarketAux API key */
+const char* getMarketAuxAPIKey(void) {
+    return marketauxApiKey;
 }
 
 /* Build a complete API URL with endpoint and parameters */
@@ -246,50 +270,128 @@ int fetchStockData(const char* symbol, const char* startDate, const char* endDat
     return success;
 }
 
-/* Fetch news data for a list of symbols */
+/* Fetch news data using MarketAux API instead of Tiingo News API */
 int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     if (!symbols || !events) {
-        printf("Error: Invalid parameters for fetchNewsFeed\n");
+        logError(ERR_INVALID_PARAMETER, "Invalid parameters for fetchNewsFeed");
         return 0;
     }
     
-    /* Build NewsAPI.ai URL and parameters */
-    char* url = (char*)malloc(MAX_URL_LENGTH);
-    if (!url) {
-        logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for URL");
+    /* Get API key for MarketAux */
+    const char* apiKey = getMarketAuxAPIKey();
+    if (!apiKey || strlen(apiKey) == 0) {
+        logError(ERR_INVALID_PARAMETER, "MarketAux API key not set");
         return 0;
     }
     
-    /* Format the query to search for stock symbols in news */
-    char query[MAX_URL_LENGTH];
-    snprintf(query, MAX_URL_LENGTH, "\"(%s)\"", symbols);
-    
-    /* Build the URL for NewsAPI.ai */
+    /* Build the MarketAux API URL */
+    char url[MAX_URL_LENGTH];
     snprintf(url, MAX_URL_LENGTH, 
-             "%s%s?apiKey=%s&keyword=%s&resultType=%s&articlesSortBy=date&articlesCount=%d&includeArticleCategories=false&includeArticleImage=false&articleBodyLen=-1&includeSourceDescription=false&includeSourceRanking=false&forceMaxDataTimeWindow=31&dataType=news&articlesSortBySourceImportance=false&includeArticleKeywords=false&includeSourceAlexa=false&articleAttributesInRetriedArticles=%s",
-             NEWSAPI_BASE_URL, 
-             NEWSAPI_ARTICLES_URL, 
-             apiKey, 
-             query,
-             NEWSAPI_DEFAULT_RESULT_TYPE,
-             NEWSAPI_DEFAULT_ARTICLE_LIMIT,
-             NEWSAPI_DEFAULT_FIELDS);
+             "%s?symbols=%s&limit=50&language=en&api_token=%s", 
+             MARKETAUX_API_URL, symbols, apiKey);
     
-    /* Perform API request */
+    /* Perform API request using curl */
     Memory response;
-    int success = performAPIRequest(url, &response);
-    free(url);
+    response.data = malloc(1);
+    if (!response.data) {
+        logError(ERR_OUT_OF_MEMORY, "Memory allocation failed for response");
+        return 0;
+    }
+    response.size = 0;
+    response.data[0] = '\0';
     
-    if (!success || !response.data) {
-        /* If we have response data, free it before returning */
-        if (response.data) {
-            free(response.data);
+    /* Build curl command with proper parameters for MarketAux */
+    char command[MAX_BUFFER_SIZE];
+    
+    /* Improve curl command with more options to handle network issues */
+    snprintf(command, sizeof(command),
+             "curl -s --connect-timeout 30 --max-time 60 --retry 5 --retry-delay 2 --retry-connrefused "
+             "--retry-max-time 120 --dns-servers 8.8.8.8,1.1.1.1 \"%s\" > curl_output.json 2>curl_error.txt",
+             url);
+    
+    /* Execute curl command */
+    int result = system(command);
+    if (result != 0) {
+        /* Try to read error details from curl_error.txt */
+        FILE* errFp = fopen("curl_error.txt", "r");
+        char errorDetails[256] = "Unknown error";
+        
+        if (errFp) {
+            if (fgets(errorDetails, sizeof(errorDetails), errFp)) {
+                /* Remove newline if present */
+                char* newline = strchr(errorDetails, '\n');
+                if (newline) *newline = '\0';
+            }
+            fclose(errFp);
         }
+        
+        /* Fall back to a simpler curl command if the first one fails */
+        snprintf(command, sizeof(command),
+                 "curl -s -k --ipv4 --connect-timeout 30 --max-time 60 \"%s\" > curl_output.json",
+                 url);
+        
+        result = system(command);
+        if (result != 0) {
+            logError(ERR_SYSTEM, "Failed to execute curl command. Error code: %d. Details: %s", 
+                    result, errorDetails);
+            free(response.data);
+            return 0;
+        }
+    }
+    
+    /* Read the output file */
+    FILE* fp = fopen("curl_output.json", "rb");
+    if (!fp) {
+        logError(ERR_FILE_OPEN_FAILED, "Failed to open curl output file");
+        free(response.data);
         return 0;
     }
     
-    /* Parse JSON response */
-    success = parseNewsDataJSON(response.data, events);
+    /* Get file size */
+    fseek(fp, 0, SEEK_END);
+    long fileSize = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    
+    if (fileSize <= 0) {
+        logError(ERR_DATA_CORRUPTED, "Empty response from API or failed request");
+        fclose(fp);
+        free(response.data);
+        return 0;
+    }
+    
+    /* Allocate memory for response data */
+    char* newData = (char*)realloc(response.data, fileSize + 1);
+    if (!newData) {
+        logError(ERR_OUT_OF_MEMORY, "Memory reallocation failed for response");
+        fclose(fp);
+        free(response.data);
+        return 0;
+    }
+    response.data = newData;
+    
+    /* Read file content */
+    size_t bytesRead = fread(response.data, 1, fileSize, fp);
+    fclose(fp);
+    
+    if (bytesRead != (size_t)fileSize) {
+        logError(ERR_FILE_READ_FAILED, "Failed to read complete curl output");
+        free(response.data);
+        return 0;
+    }
+    
+    /* Null-terminate the response data */
+    response.data[bytesRead] = '\0';
+    response.size = bytesRead;
+    
+    /* Check for API errors in the response */
+    if (strstr(response.data, "\"error\"") != NULL) {
+        logError(ERR_API_REQUEST_FAILED, "API returned an error response: %s", response.data);
+        free(response.data);
+        return 0;
+    }
+    
+    /* Parse JSON response using MarketAux format */
+    int success = parseNewsDataJSON(response.data, events);
     
     /* Clean up */
     free(response.data);
@@ -420,199 +522,398 @@ int parseStockDataJSON(const char* jsonData, Stock* stock) {
     return 1;
 }
 
-/* Parse news data JSON response */
+/* Parse JSON response from MarketAux API for news data */
 int parseNewsDataJSON(const char* jsonData, EventDatabase* events) {
     if (!jsonData || !events) {
         logError(ERR_INVALID_PARAMETER, "Invalid parameters for parseNewsDataJSON");
         return 0;
     }
-    
-    /* Initialize events array if needed */
-    if (!events->events) {
-        events->eventCapacity = 50; /* Initial capacity */
-        events->events = (EventData*)malloc(events->eventCapacity * sizeof(EventData));
-        if (!events->events) {
-            logError(ERR_OUT_OF_MEMORY, "Memory allocation failed for events");
-            return 0;
+
+    /* Check for API errors in MarketAux response */
+    if (strstr(jsonData, "\"error\"") || strstr(jsonData, "\"errors\"")) {
+        /* Check for common API errors */
+        if (strstr(jsonData, "api_token") || strstr(jsonData, "token")) {
+            logError(ERR_API_RESPONSE_INVALID, "API key error in MarketAux response: %s", jsonData);
+        } 
+        else if (strstr(jsonData, "permission") || strstr(jsonData, "unauthorized")) {
+            logError(ERR_API_REQUEST_FAILED, "API permission error: %s", jsonData);
         }
-        events->eventCount = 0;
-    }
-    
-    /* Simple JSON parser for Tiingo News API response format */
-    /* Format: [{"publishedDate":"2025-04-16T10:30:00Z", "title":"...", "description":"...", ... }, {...}, ...] */
-    
-    /* Find the beginning of the array */
-    const char* pos = strchr(jsonData, '[');
-    if (!pos) {
-        logError(ERR_DATA_CORRUPTED, "Invalid JSON format: array not found");
+        else if (strstr(jsonData, "limit") || strstr(jsonData, "quota")) {
+            logError(ERR_API_REQUEST_FAILED, "API rate limit reached: %s", jsonData);
+        }
+        else {
+            logError(ERR_API_REQUEST_FAILED, "Unknown API error: %s", jsonData);
+        }
         return 0;
     }
+
+    /* Look for the data array in MarketAux response format */
+    const char* dataStart = strstr(jsonData, "\"data\"");
+    if (!dataStart) {
+        logError(ERR_DATA_CORRUPTED, "Invalid MarketAux JSON format: 'data' field not found");
+        return 0;
+    }
+
+    /* Find the array start */
+    const char* arrayStart = strchr(dataStart, '[');
+    if (!arrayStart) {
+        logError(ERR_DATA_CORRUPTED, "Invalid MarketAux JSON format: array not found");
+        return 0;
+    }
+
+    /* Count how many objects we have */
+    int objectCount = 0;
+    const char* pos = arrayStart;
+    while ((pos = strstr(pos + 1, "{"))) {
+        objectCount++;
+    }
+
+    if (objectCount == 0) {
+        /* No news articles found, but not an error */
+        return 1;
+    }
+
+    /* Ensure enough capacity in the events database */
+    if (events->eventCount + objectCount > events->eventCapacity) {
+        int newCapacity = events->eventCapacity + objectCount + 10;  /* Add some extra */
+        EventData* newEvents = realloc(events->events, newCapacity * sizeof(EventData));
+        if (!newEvents) {
+            logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for news events");
+            return 0;
+        }
+        events->events = newEvents;
+        events->eventCapacity = newCapacity;
+    }
+
+    /* Process each object */
+    int count = 0;
+    pos = arrayStart;
     
-    /* Iterate through each object in the array */
-    while ((pos = strstr(pos, "{"))) {
-        /* Check if we need to resize the array */
-        if (events->eventCount >= events->eventCapacity) {
-            events->eventCapacity *= 2;
-            EventData* newEvents = (EventData*)realloc(events->events, events->eventCapacity * sizeof(EventData));
-            if (!newEvents) {
-                logError(ERR_OUT_OF_MEMORY, "Memory reallocation failed for events");
-                return 0;
-            }
-            events->events = newEvents;
-        }
+    while (count < objectCount) {
+        /* Find start of object */
+        const char* objStart = strstr(pos, "{");
+        if (!objStart) break;
         
-        /* Parse each field of the object */
-        EventData* event = &events->events[events->eventCount];
-        
-        /* Extract date (publishedDate in Tiingo API) */
-        const char* dateStart = strstr(pos, "\"publishedDate\"");
-        if (!dateStart) break;
-        dateStart = strchr(dateStart, ':');
-        if (!dateStart) break;
-        dateStart = strchr(dateStart, '"');
-        if (!dateStart) break;
-        dateStart++;
-        const char* dateEnd = strchr(dateStart, 'T'); /* Timestamp format: 2025-04-16T10:30:00Z */
-        if (!dateEnd) dateEnd = strchr(dateStart, '"'); /* Fallback if no 'T' */
-        if (!dateEnd || (dateEnd - dateStart) >= MAX_DATE_LENGTH) break;
-        memcpy(event->date, dateStart, dateEnd - dateStart);
-        event->date[dateEnd - dateStart] = '\0';
-        
-        /* Extract title */
-        const char* titleStart = strstr(pos, "\"title\"");
-        if (!titleStart) break;
-        titleStart = strchr(titleStart, ':');
-        if (!titleStart) break;
-        titleStart = strchr(titleStart, '"');
-        if (!titleStart) break;
-        titleStart++;
-        const char* titleEnd = strchr(titleStart, '"');
-        if (!titleEnd || (titleEnd - titleStart) >= MAX_BUFFER_SIZE) break;
-        memcpy(event->title, titleStart, titleEnd - titleStart);
-        event->title[titleEnd - titleStart] = '\0';
-        
-        /* Extract description */
-        const char* descStart = strstr(pos, "\"description\"");
-        if (!descStart) {
-            /* Try "content" if "description" is not available */
-            descStart = strstr(pos, "\"content\"");
-        }
-        if (descStart) {
-            descStart = strchr(descStart, ':');
-            if (descStart) {
-                descStart = strchr(descStart, '"');
-                if (descStart) {
-                    descStart++;
-                    const char* descEnd = strchr(descStart, '"');
-                    if (descEnd && (descEnd - descStart) < MAX_BUFFER_SIZE) {
-                        memcpy(event->description, descStart, descEnd - descStart);
-                        event->description[descEnd - descStart] = '\0';
-                    } else {
-                        /* Description too long or not properly terminated */
-                        strncpy(event->description, "No description available", MAX_BUFFER_SIZE - 1);
-                        event->description[MAX_BUFFER_SIZE - 1] = '\0';
-                    }
-                }
-            }
-        } else {
-            /* No description or content found */
-            strncpy(event->description, "No description available", MAX_BUFFER_SIZE - 1);
-            event->description[MAX_BUFFER_SIZE - 1] = '\0';
-        }
-        
-        /* Extract source if available for sentiment analysis */
-        const char* sourceStart = strstr(pos, "\"source\"");
-        if (sourceStart) {
-            /* Calculate a simple sentiment score based on keywords in title and description */
-            /* This is a basic implementation - in real world, we would use NLP or ML models */
-            double sentiment = 0.0;
-            
-            /* Look for positive keywords */
-            const char* positiveKeywords[] = {"growth", "increase", "positive", "rise", "record",
-                                            "profit", "exceed", "beat", "success", "gain"};
-            int posKeywordCount = sizeof(positiveKeywords) / sizeof(positiveKeywords[0]);
-            
-            /* Look for negative keywords */
-            const char* negativeKeywords[] = {"decline", "decrease", "negative", "fall", "loss",
-                                            "miss", "below", "fail", "drop", "cut"};
-            int negKeywordCount = sizeof(negativeKeywords) / sizeof(negativeKeywords[0]);
-            
-            /* Count positive keywords */
-            int posCount = 0;
-            for (int i = 0; i < posKeywordCount; i++) {
-                if (strstr(event->title, positiveKeywords[i]) || 
-                    strstr(event->description, positiveKeywords[i])) {
-                    posCount++;
-                }
-            }
-            
-            /* Count negative keywords */
-            int negCount = 0;
-            for (int i = 0; i < negKeywordCount; i++) {
-                if (strstr(event->title, negativeKeywords[i]) || 
-                    strstr(event->description, negativeKeywords[i])) {
-                    negCount++;
-                }
-            }
-            
-            /* Calculate sentiment based on keyword counts */
-            if (posCount + negCount > 0) {
-                sentiment = (double)(posCount - negCount) / (posCount + negCount);
-            }
-            event->sentiment = sentiment;
-            
-            /* Calculate a simple impact score (0-100) based on source credibility and keywords */
-            const char* majorSources[] = {"Reuters", "Bloomberg", "CNBC", "WSJ", "Financial Times"};
-            int majorSourceCount = sizeof(majorSources) / sizeof(majorSources[0]);
-            
-            /* Check if from a major source (more impact) */
-            int isMajorSource = 0;
-            for (int i = 0; i < majorSourceCount; i++) {
-                if (strstr(sourceStart, majorSources[i])) {
-                    isMajorSource = 1;
+        /* Find end of object - handle nested objects properly */
+        const char* objEnd = NULL;
+        int braceCount = 1;
+        for (const char* c = objStart + 1; *c; c++) {
+            if (*c == '{') braceCount++;
+            else if (*c == '}') {
+                braceCount--;
+                if (braceCount == 0) {
+                    objEnd = c;
                     break;
                 }
             }
-            
-            /* Impact keywords */
-            const char* impactKeywords[] = {"significant", "major", "dramatic", "substantial", 
-                                          "critical", "breaking", "urgent", "important"};
-            int impactKeywordCount = sizeof(impactKeywords) / sizeof(impactKeywords[0]);
-            
-            /* Count impact keywords */
-            int impactCount = 0;
-            for (int i = 0; i < impactKeywordCount; i++) {
-                if (strstr(event->title, impactKeywords[i]) || 
-                    strstr(event->description, impactKeywords[i])) {
-                    impactCount++;
-                }
-            }
-            
-            /* Calculate impact score */
-            int impactScore = impactCount * 15;
-            if (isMajorSource) impactScore += 20;
-            if (impactScore > 100) impactScore = 100;
-            
-            event->impactScore = impactScore;
-        } else {
-            /* Default values if source info is not available */
-            event->sentiment = 0.0;
-            event->impactScore = 50;
         }
         
-        /* Move to the next record */
+        if (!objEnd) break;
+        
+        /* Process this object/article */
+        EventData* event = &events->events[events->eventCount];
+        memset(event, 0, sizeof(EventData));
+        
+        /* Extract date from "published_at" field in MarketAux format */
+        const char* publishedField = strstr(objStart, "\"published_at\"");
+        if (publishedField) {
+            const char* datePos = strchr(publishedField, ':');
+            if (datePos) {
+                datePos = strchr(datePos, '"');
+                if (datePos) {
+                    datePos++; /* Skip first quote */
+                    int i = 0;
+                    while (datePos[i] && datePos[i] != '"' && i < (int)(sizeof(event->date) - 1)) {
+                        /* Only copy the date part (up to 10 chars) */
+                        if (i < 10) {
+                            event->date[i] = datePos[i];
+                        }
+                        i++;
+                    }
+                    event->date[10] = '\0'; /* Ensure we only store the date part */
+                }
+            }
+        }
+        
+        /* Extract title from MarketAux format */
+        const char* titleField = strstr(objStart, "\"title\"");
+        if (titleField) {
+            const char* titlePos = strchr(titleField, ':');
+            if (titlePos) {
+                titlePos = strchr(titlePos, '"');
+                if (titlePos) {
+                    titlePos++; /* Skip first quote */
+                    int i = 0;
+                    while (titlePos[i] && titlePos[i] != '"' && i < (int)(sizeof(event->title) - 1)) {
+                        event->title[i] = titlePos[i];
+                        i++;
+                    }
+                    event->title[i] = '\0';
+                }
+            }
+        }
+        
+        /* Extract description from "description" field in MarketAux format */
+        const char* descField = strstr(objStart, "\"description\"");
+        if (descField) {
+            const char* descPos = strchr(descField, ':');
+            if (descPos) {
+                descPos = strchr(descPos, '"');
+                if (descPos) {
+                    descPos++; /* Skip first quote */
+                    int i = 0;
+                    while (descPos[i] && descPos[i] != '"' && i < (int)(sizeof(event->description) - 1)) {
+                        event->description[i] = descPos[i];
+                        i++;
+                    }
+                    event->description[i] = '\0';
+                }
+            }
+        }
+        
+        /* Extract source information from MarketAux format */
+        const char* sourceField = strstr(objStart, "\"source\"");
+        if (sourceField) {
+            const char* sourceNameField = strstr(sourceField, "\"name\"");
+            if (sourceNameField) {
+                const char* namePos = strchr(sourceNameField, ':');
+                if (namePos) {
+                    namePos = strchr(namePos, '"');
+                    if (namePos) {
+                        namePos++; /* Skip first quote */
+                        
+                        /* Create a source prefix to add to title */
+                        char sourcePrefix[MAX_BUFFER_SIZE/2] = {0};
+                        int i = 0;
+                        while (namePos[i] && namePos[i] != '"' && i < (int)(sizeof(sourcePrefix) - 10)) {
+                            sourcePrefix[i] = namePos[i];
+                            i++;
+                        }
+                        sourcePrefix[i] = '\0';
+                        
+                        /* Prepend source to title if we have both */
+                        if (sourcePrefix[0] && event->title[0]) {
+                            char tempTitle[MAX_BUFFER_SIZE] = {0};
+                            snprintf(tempTitle, sizeof(tempTitle), "[%s] %s", sourcePrefix, event->title);
+                            strncpy(event->title, tempTitle, sizeof(event->title) - 1);
+                            event->title[sizeof(event->title) - 1] = '\0';
+                        }
+                    }
+                }
+            }
+        }
+        
+        /* Extract URL from MarketAux format */
+        const char* urlField = strstr(objStart, "\"url\"");
+        if (urlField) {
+            const char* urlPos = strchr(urlField, ':');
+            if (urlPos) {
+                urlPos = strchr(urlPos, '"');
+                if (urlPos) {
+                    urlPos++; /* Skip first quote */
+                    
+                    /* Extract the URL into a temp buffer */
+                    char urlBuffer[MAX_BUFFER_SIZE/2] = {0};
+                    int i = 0;
+                    while (urlPos[i] && urlPos[i] != '"' && i < (int)(sizeof(urlBuffer) - 1)) {
+                        urlBuffer[i] = urlPos[i];
+                        i++;
+                    }
+                    urlBuffer[i] = '\0';
+                    
+                    /* If we have room, append URL to description */
+                    if (strlen(event->description) + strlen(urlBuffer) + 10 < sizeof(event->description)) {
+                        strcat(event->description, "\nSource URL: ");
+                        strcat(event->description, urlBuffer);
+                    }
+                }
+            }
+        }
+        
+        /* Extract symbols/tickers mentioned in the news from MarketAux format */
+        const char* entitiesField = strstr(objStart, "\"entities\"");
+        if (entitiesField) {
+            const char* symbolsStart = strstr(entitiesField, "\"symbols\"");
+            if (symbolsStart) {
+                /* Find symbols array start */
+                const char* symbolsArray = strchr(symbolsStart, '[');
+                if (symbolsArray) {
+                    char symbolsBuffer[256] = {0};
+                    const char* symbolName;
+                    const char* symbolEnd;
+                    const char* symbolPos = symbolsArray;
+                    int symbolsAdded = 0;
+                    
+                    /* Iterate through symbols array */
+                    while ((symbolName = strstr(symbolPos, "\"name\"")) && symbolsAdded < 5) {
+                        symbolName = strchr(symbolName, ':');
+                        if (!symbolName) break;
+                        symbolName = strchr(symbolName, '"');
+                        if (!symbolName) break;
+                        symbolName++; /* Skip first quote */
+                        
+                        symbolEnd = strchr(symbolName, '"');
+                        if (!symbolEnd) break;
+                        
+                        /* Add symbol to our buffer with separator */
+                        if (symbolsAdded > 0) {
+                            strcat(symbolsBuffer, ", ");
+                        }
+                        
+                        /* Copy symbol name */
+                        int nameLen = symbolEnd - symbolName;
+                        strncat(symbolsBuffer, symbolName, nameLen > 10 ? 10 : nameLen);
+                        
+                        symbolsAdded++;
+                        symbolPos = symbolEnd + 1;
+                    }
+                    
+                    /* If we found symbols, add them to the event description */
+                    if (symbolsBuffer[0]) {
+                        char symbolsInfo[300];
+                        snprintf(symbolsInfo, sizeof(symbolsInfo), "\nMentioned symbols: %s", symbolsBuffer);
+                        
+                        if (strlen(event->description) + strlen(symbolsInfo) < sizeof(event->description)) {
+                            strcat(event->description, symbolsInfo);
+                        }
+                    }
+                }
+            }
+        }
+        
+        /* Extract sentiment information from MarketAux if available */
+        const char* sentimentField = strstr(objStart, "\"sentiment\"");
+        if (sentimentField) {
+            /* Try to get the sentiment score directly from MarketAux */
+            const char* scoreField = strstr(sentimentField, "\"score\"");
+            if (scoreField) {
+                const char* scorePos = strchr(scoreField, ':');
+                if (scorePos) {
+                    double marketauxSentiment = strtod(scorePos + 1, NULL);
+                    /* MarketAux sentiment is typically 0 to 1, scale to our -1 to 1 range */
+                    event->sentiment = (marketauxSentiment - 0.5) * 2.0;
+                }
+            }
+        } else {
+            /* Fall back to our own sentiment analysis if MarketAux doesn't provide it */
+            event->sentiment = calculateSentiment(event->title, event->description);
+        }
+        
+        /* Calculate impact score */
+        event->impactScore = calculateImpactScore(event);
+        
+        /* Check if it's a major news source to adjust the score */
+        const char* majorSources[] = {"Bloomberg", "Reuters", "CNBC", "WSJ", "Barron", "Forbes", "MarketWatch"};
+        for (int i = 0; i < (int)(sizeof(majorSources) / sizeof(majorSources[0])); i++) {
+            if (strstr(event->title, majorSources[i])) {
+                /* Major sources get a boost in impact score */
+                event->impactScore += 2;
+                break;
+            }
+        }
+        
+        /* Clamp impact score to reasonable range */
+        if (event->impactScore > 10) event->impactScore = 10;
+        if (event->impactScore < 0) event->impactScore = 0;
+        
+        /* Add to event database */
         events->eventCount++;
-        pos = strchr(pos, '}');
-        if (!pos) break;
+        count++;
+        
+        /* Move to next position */
+        pos = objEnd + 1;
     }
     
-    if (events->eventCount == 0) {
-        logError(ERR_DATA_CORRUPTED, "Failed to parse any events from JSON response");
-        return 0;
+    /* Return success if we processed at least one event */
+    return count > 0;
+}
+
+/* Calculate sentiment score for a news event based on title and description */
+double calculateSentiment(const char* title, const char* description) {
+    /* Simple sentiment analysis based on keyword matching */
+    const char* positiveWords[] = {
+        "up", "rise", "gain", "surge", "jump", "positive", "growth",
+        "profit", "success", "beat", "exceed", "strong", "bullish",
+        "rally", "record", "high", "opportunity", "upgrade"
+    };
+    
+    const char* negativeWords[] = {
+        "down", "fall", "drop", "decline", "slip", "negative", "loss",
+        "miss", "fail", "weak", "bearish", "crash", "plunge", "concern",
+        "risk", "fear", "warn", "downgrade", "trouble", "crisis"
+    };
+    
+    int posCount = 0;
+    int negCount = 0;
+    
+    /* Check title for sentiment keywords */
+    for (size_t i = 0; i < sizeof(positiveWords) / sizeof(positiveWords[0]); i++) {
+        if (strstr(title, positiveWords[i])) {
+            posCount += 2;  /* Title matches have higher weight */
+        }
     }
     
-    logMessage(LOG_INFO, "Successfully parsed %d events from JSON response", events->eventCount);
-    return 1;
+    for (size_t i = 0; i < sizeof(negativeWords) / sizeof(negativeWords[0]); i++) {
+        if (strstr(title, negativeWords[i])) {
+            negCount += 2;  /* Title matches have higher weight */
+        }
+    }
+    
+    /* Check description for sentiment keywords */
+    for (size_t i = 0; i < sizeof(positiveWords) / sizeof(positiveWords[0]); i++) {
+        if (strstr(description, positiveWords[i])) {
+            posCount++;
+        }
+    }
+    
+    for (size_t i = 0; i < sizeof(negativeWords) / sizeof(negativeWords[0]); i++) {
+        if (strstr(description, negativeWords[i])) {
+            negCount++;
+        }
+    }
+    
+    /* Calculate sentiment score from -1.0 (very negative) to 1.0 (very positive) */
+    if (posCount + negCount == 0) {
+        return 0.0;  /* Neutral if no sentiment words found */
+    }
+    
+    return (double)(posCount - negCount) / (posCount + negCount);
+}
+
+/* Calculate impact score for a news event (0-10 scale) */
+double calculateImpactScore(const EventData* event) {
+    double score = 5.0;  /* Start with neutral score */
+    
+    /* Adjust based on sentiment - stronger sentiment = higher impact */
+    double sentimentImpact = fabs(event->sentiment) * 2.0;
+    score += sentimentImpact;
+    
+    /* Important keywords increase impact score */
+    const char* highImpactWords[] = {
+        "earnings", "merger", "acquisition", "bankruptcy", "CEO", 
+        "executive", "lawsuit", "settlement", "FDA", "approval",
+        "patent", "investigation", "dividend", "guidance", "forecast",
+        "outlook", "revenue", "profit", "scandal", "breach", "hack",
+        "recall", "crisis", "significant", "substantial", "breakthrough"
+    };
+    
+    for (size_t i = 0; i < sizeof(highImpactWords) / sizeof(highImpactWords[0]); i++) {
+        if (strstr(event->title, highImpactWords[i]) || 
+            strstr(event->description, highImpactWords[i])) {
+            score += 1.0;
+            /* Cap the boost at 3.0 */
+            if (score > 8.0) {
+                score = 8.0;
+                break;
+            }
+        }
+    }
+    
+    /* Cap final score between 0 and 10 */
+    if (score < 0.0) score = 0.0;
+    if (score > 10.0) score = 10.0;
+    
+    return score;
 }
 
 /* Generate a filename for the CSV cache based on symbol and date range */

@@ -30,6 +30,7 @@ void analyzeStock(const Stock* stock, const EventDatabase* newsEvents);
 
 int main(int argc, char* argv[]) {
     char apiKey[MAX_API_KEY_LENGTH] = "";
+    char marketauxApiKey[MARKETAUX_API_KEY_LENGTH] = ""; // Added for MarketAux API key
     char symbols[MAX_STOCKS][MAX_SYMBOL_LENGTH];
     int symbolCount = 0;
     char startDate[MAX_DATE_LENGTH] = "";
@@ -50,6 +51,12 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 strncpy(apiKey, argv[i + 1], MAX_API_KEY_LENGTH - 1);
                 apiKey[MAX_API_KEY_LENGTH - 1] = '\0';
+                i++;
+            }
+        } else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--marketaux-key") == 0) {
+            if (i + 1 < argc) {
+                strncpy(marketauxApiKey, argv[i + 1], MARKETAUX_API_KEY_LENGTH - 1);
+                marketauxApiKey[MARKETAUX_API_KEY_LENGTH - 1] = '\0';
                 i++;
             }
         } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--symbols") == 0) {
@@ -107,6 +114,11 @@ int main(int argc, char* argv[]) {
     /* Initialize API */
     if (!initializeTiingoAPI(apiKey)) {
         return 1;
+    }
+    
+    /* Set the MarketAux API key if provided */
+    if (strlen(marketauxApiKey) > 0) {
+        setMarketAuxAPIKey(marketauxApiKey);
     }
     
     /* Initialize stocks and events */
@@ -371,9 +383,10 @@ void analyzeStock(const Stock* stock, const EventDatabase* newsEvents) {
 }
 
 void printUsage(const char* programName) {
-    printf("Usage: %s -k API_KEY -s SYMBOLS [options]\n\n", programName);
+    printf("Usage: %s -k API_KEY -m MARKETAUX_KEY -s SYMBOLS [options]\n\n", programName);
     printf("Options:\n");
-    printf("  -k, --api-key KEY       Tiingo API key\n");
+    printf("  -k, --api-key KEY       Tiingo API key (for market data)\n");
+    printf("  -m, --marketaux-key KEY MarketAux API key (for news data)\n");
     printf("  -s, --symbols SYM1,SYM2 Comma-separated list of stock symbols\n");
     printf("  --start-date DATE       Start date (YYYY-MM-DD), default is 10 years ago\n");
     printf("  --end-date DATE         End date (YYYY-MM-DD), default is today\n");

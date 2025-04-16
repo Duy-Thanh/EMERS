@@ -7,39 +7,45 @@
 #define TIINGO_API_H
 
 #include "emers.h"
+#include "event_database.h"
 
-/* Tiingo API specific constants */
-#define TIINGO_API_BASE_URL "https://api.tiingo.com"
-#define TIINGO_API_DAILY_URL "/tiingo/daily"
-#define TIINGO_API_NEWS_URL "/tiingo/news"
-#define CSV_DATA_DIRECTORY "./data/"
-#define MAX_PATH_LENGTH 256
+/* Tiingo API buffer sizes - don't redefine macros from emers.h */
+#define MAX_BUFFER_SIZE     4096
+#define MAX_PATH_LENGTH      512
 
-/* NewsAPI.ai specific constants */
-#define NEWSAPI_BASE_URL "https://api.newsapi.ai"
-#define NEWSAPI_ARTICLES_URL "/api/v1/article/getArticles"
-#define NEWSAPI_DEFAULT_FIELDS "title,body,sourceUri,publishDate,source.title"
-#define NEWSAPI_DEFAULT_RESULT_TYPE "articles"
-#define NEWSAPI_DEFAULT_ARTICLE_LIMIT 50
+/* Tiingo API URLs */
+#define TIINGO_API_BASE_URL      "https://api.tiingo.com/"
+#define TIINGO_API_DAILY_URL     "tiingo/daily"
 
-/* API and HTTP helper typedefs */
+/* MarketAux API definitions */
+#define MARKETAUX_API_URL        "https://api.marketaux.com/v1/news/all"
+#define MARKETAUX_API_KEY_LENGTH 64
+
+/* Data storage */
+#define CSV_DATA_DIRECTORY       "./data/"
+
+/* Callback data structure for curl */
 typedef struct {
-    char* data;
+    char *data;
     size_t size;
 } Memory;
 
 /* Function prototypes */
 
-/* API initialization and setup */
+/* Initialization and configuration */
 int initializeTiingoAPI(const char* apiKey);
-void setTiingoAPIKey(const char* apiKey);
+void setTiingoAPIKey(const char* key);
 const char* getTiingoAPIKey(void);
 
-/* HTTP and API request functions */
+/* MarketAux API configuration */
+void setMarketAuxAPIKey(const char* key);
+const char* getMarketAuxAPIKey(void);
+
+/* API request helpers */
 char* buildAPIUrl(const char* endpoint, const char* params);
 int performAPIRequest(const char* url, Memory* response);
 
-/* Data retrieval functions */
+/* API data fetching */
 int fetchStockData(const char* symbol, const char* startDate, const char* endDate, Stock* stock);
 int fetchNewsFeed(const char* symbols, EventDatabase* events);
 
@@ -53,6 +59,10 @@ char* generateCSVFilename(const char* symbol, const char* startDate, const char*
 /* JSON parsing functions */
 int parseStockDataJSON(const char* jsonData, Stock* stock);
 int parseNewsDataJSON(const char* jsonData, EventDatabase* events);
+
+/* Sentiment analysis and impact scoring functions */
+double calculateSentiment(const char* title, const char* description);
+double calculateImpactScore(const EventData* event);
 
 /* Error handling */
 void logAPIError(const char* message, const char* url, int statusCode);
