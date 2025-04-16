@@ -1,0 +1,110 @@
+# name: EMERS CI/CD
+
+# on:
+#   push:
+#     branches: [ main, develop ]
+#   pull_request:
+#     branches: [ main, develop ]
+
+# jobs:
+#   build-linux:
+#     runs-on: ubuntu-latest
+#     steps:
+#     - uses: actions/checkout@v2
+
+#     - name: Install dependencies
+#       run: |
+#         sudo apt-get update
+#         sudo apt-get install -y build-essential curl libcurl4-openssl-dev
+
+#     - name: Build project
+#       run: |
+#         make clean
+#         make
+
+#     - name: Run tests
+#       run: |
+#         make test
+
+#   build-windows:
+#     runs-on: windows-latest
+#     steps:
+#     - uses: actions/checkout@v2
+
+#     - name: Setup MinGW
+#       uses: egor-tensin/setup-mingw@v2
+#       with:
+#         platform: x64
+
+#     - name: Install dependencies
+#       run: |
+#         choco install curl
+
+#     - name: Build project
+#       run: |
+#         mingw32-make clean
+#         mingw32-make
+
+#     - name: Run tests
+#       run: |
+#         mingw32-make test
+
+#   validate-models:
+#     runs-on: ubuntu-latest
+#     needs: build-linux
+#     steps:
+#     - uses: actions/checkout@v2
+
+#     - name: Install dependencies
+#       run: |
+#         sudo apt-get update
+#         sudo apt-get install -y build-essential curl libcurl4-openssl-dev
+
+#     - name: Build project
+#       run: |
+#         make clean
+#         make
+
+#     - name: Run model validation
+#       run: |
+#         mkdir -p validation_results
+#         bin/emers -k ${{ secrets.TIINGO_API_KEY }} -s AAPL,MSFT,GOOGL --validate-models
+        
+#     - name: Archive validation results
+#       uses: actions/upload-artifact@v2
+#       with:
+#         name: validation-results
+#         path: validation_results/
+
+#   regression-test:
+#     runs-on: ubuntu-latest
+#     needs: build-linux
+#     if: github.event_name == 'pull_request'
+#     steps:
+#     - uses: actions/checkout@v2
+
+#     - name: Install dependencies
+#       run: |
+#         sudo apt-get update
+#         sudo apt-get install -y build-essential curl libcurl4-openssl-dev
+
+#     - name: Build project
+#       run: |
+#         make clean
+#         make
+
+#     - name: Download baseline results
+#       run: |
+#         mkdir -p baseline_results
+#         # In a real project, download baseline results from a storage location
+#         # or use reference files committed to the repository
+        
+#     - name: Run regression tests
+#       run: |
+#         bin/emers -k ${{ secrets.TIINGO_API_KEY }} -s AAPL,MSFT,GOOGL --regression-test
+
+#     - name: Archive regression test results
+#       uses: actions/upload-artifact@v2
+#       with:
+#         name: regression-test-results
+#         path: regression_results/ 
