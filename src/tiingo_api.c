@@ -253,15 +253,27 @@ int fetchNewsFeed(const char* symbols, EventDatabase* events) {
         return 0;
     }
     
-    /* Build parameters */
-    char params[MAX_URL_LENGTH];
-    snprintf(params, MAX_URL_LENGTH, "tickers=%s&limit=50&format=json", symbols);
-    
-    /* Build full URL */
-    char* url = buildAPIUrl(TIINGO_API_NEWS_URL, params);
+    /* Build NewsAPI.ai URL and parameters */
+    char* url = (char*)malloc(MAX_URL_LENGTH);
     if (!url) {
+        logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for URL");
         return 0;
     }
+    
+    /* Format the query to search for stock symbols in news */
+    char query[MAX_URL_LENGTH];
+    snprintf(query, MAX_URL_LENGTH, "\"(%s)\"", symbols);
+    
+    /* Build the URL for NewsAPI.ai */
+    snprintf(url, MAX_URL_LENGTH, 
+             "%s%s?apiKey=%s&keyword=%s&resultType=%s&articlesSortBy=date&articlesCount=%d&includeArticleCategories=false&includeArticleImage=false&articleBodyLen=-1&includeSourceDescription=false&includeSourceRanking=false&forceMaxDataTimeWindow=31&dataType=news&articlesSortBySourceImportance=false&includeArticleKeywords=false&includeSourceAlexa=false&articleAttributesInRetriedArticles=%s",
+             NEWSAPI_BASE_URL, 
+             NEWSAPI_ARTICLES_URL, 
+             apiKey, 
+             query,
+             NEWSAPI_DEFAULT_RESULT_TYPE,
+             NEWSAPI_DEFAULT_ARTICLE_LIMIT,
+             NEWSAPI_DEFAULT_FIELDS);
     
     /* Perform API request */
     Memory response;

@@ -15,6 +15,13 @@
 #define CSV_DATA_DIRECTORY "./data/"
 #define MAX_PATH_LENGTH 256
 
+/* NewsAPI.ai specific constants */
+#define NEWSAPI_BASE_URL "https://api.newsapi.ai"
+#define NEWSAPI_ARTICLES_URL "/api/v1/article/getArticles"
+#define NEWSAPI_DEFAULT_FIELDS "title,body,sourceUri,publishDate,source.title"
+#define NEWSAPI_DEFAULT_RESULT_TYPE "articles"
+#define NEWSAPI_DEFAULT_ARTICLE_LIMIT 50
+
 /* API and HTTP helper typedefs */
 typedef struct {
     char* data;
