@@ -71,6 +71,11 @@ typedef struct {
 #define ERR_CACHE_READ_FAILED       5104
 #define ERR_ANALYSIS_FAILED         5105
 
+/* Add ERR_MEMORY_ALLOCATION error code if it doesn't exist */
+#ifndef ERR_MEMORY_ALLOCATION
+#define ERR_MEMORY_ALLOCATION -2
+#endif
+
 /* Initialize the error handling and logging system */
 int initErrorHandling(const char* logFilePath, LogLevel minFileLevel, LogLevel minConsoleLevel);
 

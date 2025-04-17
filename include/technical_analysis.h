@@ -182,4 +182,12 @@ void asmCalculateStandardDeviation(const double* data, int dataSize, double* res
 void asmCalculateMovingAverage(const double* data, int dataSize, int period, double* output);
 #endif
 
+/* Calculate all indicators for a single data point */
+void calculateIndicatorsForDataPoint(const StockData* data, int dataSize, int dataIndex, 
+                                   TechnicalIndicators* indicators);
+
+/* Additional analysis functions */
+double predictVolatility(const StockData* data, int dataSize, int period);
+double predictVolatilityGARCH(const StockData* data, int dataSize, int period);
+
 #endif /* TECHNICAL_ANALYSIS_H */

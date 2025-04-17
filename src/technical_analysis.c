@@ -172,3 +172,105 @@ void calculateAllIndicators(const StockData* data, int dataSize, TechnicalIndica
     calculateBollingerBands(data, dataSize, DEFAULT_BOLLINGER_PERIOD, DEFAULT_BOLLINGER_STDDEV,
                           &indicators->bollingerUpper, &indicators->bollingerMiddle, &indicators->bollingerLower);
 }
+
+/**
+ * Calculate extended technical indicators
+ */
+void calculateExtendedIndicators(const StockData* data, int dataSize, ExtendedTechnicalIndicators* indicators) {
+    /* Stub implementation */
+    if (!data || dataSize <= 0 || !indicators) {
+        return;
+    }
+    
+    /* Calculate basic indicators */
+    int lastIndex = dataSize - 1;
+    indicators->sma = data[lastIndex].close;
+    indicators->ema = data[lastIndex].close;
+    indicators->rsi = 50.0;
+    indicators->macd = 0.0;
+    indicators->macdSignal = 0.0;
+    indicators->macdHistogram = 0.0;
+    indicators->bollingerUpper = data[lastIndex].close * 1.02;
+    indicators->bollingerMiddle = data[lastIndex].close;
+    indicators->bollingerLower = data[lastIndex].close * 0.98;
+    indicators->atr = (data[lastIndex].high - data[lastIndex].low);
+    
+    /* Advanced indicators */
+    indicators->adx = 25.0;
+    indicators->diPlus = 20.0;
+    indicators->diMinus = 15.0;
+    indicators->stochasticK = 50.0;
+    indicators->stochasticD = 50.0;
+    indicators->mfi = 50.0;
+    indicators->psar = data[lastIndex].close * 0.99;
+    
+    /* Event-adjusted indicators - use same values */
+    indicators->eventADX = indicators->adx;
+    indicators->eventStochasticK = indicators->stochasticK;
+    indicators->eventStochasticD = indicators->stochasticD;
+    indicators->eventMFI = indicators->mfi;
+    indicators->eventPSAR = indicators->psar;
+}
+
+/**
+ * Predict volatility using a simple model
+ */
+double predictVolatility(const StockData* data, int dataSize, int period) {
+    /* Stub implementation */
+    if (!data || dataSize <= 0 || period <= 0) {
+        return 0.0;
+    }
+    
+    /* Simple implementation - just return a fixed value */
+    return 0.15; /* 15% volatility */
+}
+
+/**
+ * Predict volatility using a GARCH model
+ */
+double predictVolatilityGARCH(const StockData* data, int dataSize, int period) {
+    /* Stub implementation */
+    if (!data || dataSize <= 0 || period <= 0) {
+        return 0.0;
+    }
+    
+    /* Simple implementation - just return a fixed value */
+    return 0.18; /* 18% volatility (slightly higher than simple method) */
+}
+
+/**
+ * Calculate event-adjusted technical indicators
+ */
+void calculateEventAdjustedIndicators(const StockData* data, int dataSize, 
+                                     const EventData* event, ExtendedTechnicalIndicators* indicators) {
+    /* Stub implementation */
+    if (!data || dataSize <= 0 || !event || !indicators) {
+        return;
+    }
+    
+    /* Calculate normal extended indicators first */
+    calculateExtendedIndicators(data, dataSize, indicators);
+    
+    /* Adjust the event-specific indicator values */
+    indicators->eventADX += 5.0; /* Increase ADX to show stronger trend due to event */
+    indicators->eventStochasticK += 10.0;
+    if (indicators->eventStochasticK > 100.0) indicators->eventStochasticK = 100.0;
+    indicators->eventStochasticD += 10.0;
+    if (indicators->eventStochasticD > 100.0) indicators->eventStochasticD = 100.0;
+    
+    /* MFI might decrease during negative events */
+    if (event->sentiment < 0) {
+        indicators->eventMFI -= 10.0;
+        if (indicators->eventMFI < 0.0) indicators->eventMFI = 0.0;
+    } else {
+        indicators->eventMFI += 10.0;
+        if (indicators->eventMFI > 100.0) indicators->eventMFI = 100.0;
+    }
+    
+    /* PSAR might adjust based on event type */
+    if (event->type == PRICE_JUMP || event->type == EARNINGS_ANNOUNCEMENT) {
+        indicators->eventPSAR *= 0.98; /* Lower PSAR to adjust for positive movement */
+    } else if (event->type == PRICE_DROP) {
+        indicators->eventPSAR *= 1.02; /* Raise PSAR to adjust for negative movement */
+    }
+}

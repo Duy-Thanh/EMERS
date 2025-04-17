@@ -38,14 +38,33 @@ typedef struct {
     int dataCapacity;
 } Stock;
 
+/* Event type definitions */
+typedef enum {
+    UNKNOWN_EVENT = 0,
+    PRICE_JUMP,
+    PRICE_DROP,
+    VOLUME_SPIKE,
+    VOLATILITY_SPIKE,
+    EARNINGS_ANNOUNCEMENT,
+    DIVIDEND_ANNOUNCEMENT,
+    MERGER_ACQUISITION,
+    FED_ANNOUNCEMENT,
+    ECONOMIC_DATA_RELEASE
+} EventType;
+
+/* Event data structure */
 typedef struct {
-    char title[MAX_BUFFER_SIZE];
-    char description[MAX_BUFFER_SIZE];
-    char date[MAX_DATE_LENGTH];
-    double sentiment;
-    int impactScore;
-    char url[MAX_URL_LENGTH];   /* URL to the news source */
-    time_t timestamp;           /* Timestamp of the event */
+    char symbol[16];           /* Stock symbol associated with event */
+    char date[16];             /* Date of the event (YYYY-MM-DD) */
+    char description[MAX_BUFFER_SIZE]; /* Human-readable description */
+    EventType type;            /* Type of event */
+    double magnitude;          /* Event magnitude (severity) */
+    /* Extended fields needed for news events */
+    char title[MAX_BUFFER_SIZE]; /* News article title */
+    char url[MAX_URL_LENGTH];    /* URL to the news source */
+    time_t timestamp;            /* Event timestamp */
+    float sentiment;             /* Sentiment score (-1.0 to 1.0) */
+    int impactScore;             /* Impact score (0-10) */
 } EventData;
 
 typedef struct {
@@ -66,24 +85,6 @@ typedef struct {
     double bollingerLower;
     double atr;       // Average True Range
 } TechnicalIndicators;
-
-/**
- * @enum EventType
- * @brief Types of market events that can be detected and analyzed
- */
-typedef enum {
-    MERGER_ACQUISITION,
-    EARNINGS_REPORT,  
-    CORPORATE_SCANDAL,
-    LEADERSHIP_CHANGE,
-    STOCK_SPLIT,
-    IPO,
-    LAYOFFS,
-    PRODUCT_LAUNCH,
-    PARTNERSHIP,
-    REGULATORY_CHANGE,
-    UNKNOWN_EVENT
-} EventType;
 
 /**
  * @struct MarketEvent

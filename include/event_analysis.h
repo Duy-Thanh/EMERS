@@ -34,6 +34,14 @@ typedef struct {
     int durationEstimate;         // Estimated duration in days
 } DetailedEventData;
 
+/* Similar historical event structure */
+typedef struct {
+    EventData event;                /* The historical event */
+    double similarityScore;         /* Similarity score (0.0-1.0) with current event */
+    double priceChangeAfterEvent;   /* Price change % following the event */
+    int recoveryTimeDays;           /* Days to recover/normalize after event */
+} SimilarHistoricalEvent;
+
 /* Function prototypes */
 
 /* Event detection */
@@ -61,5 +69,15 @@ void recommendDefensiveStrategy(const DetailedEventData* event, const Stock* sto
 int addEvent(EventDatabase* db, const EventData* event);
 int findSimilarEvents(const EventData* event, const EventDatabase* db, int* similarEventIndices, int maxResults);
 double calculateEventSimilarity(const EventData* event1, const EventData* event2);
+
+/* Generate reports */
+char* generateEventAnalysisReport(const DetailedEventData* event, int reportSize);
+void formatEventAnalysisReport(const DetailedEventData* event, char* report, int reportSize);
+
+/* Additional event analysis functions */
+double calculateAbnormalReturn(const Stock* stock, const char* eventDate, int window);
+double calculateVolatilityChange(const Stock* stock, const char* eventDate, int preWindow, int postWindow);
+void identifyAffectedSectors(const EventData* event, const Stock** sectorStocks, int sectorCount, 
+                           char* outputSectors);
 
 #endif /* EVENT_ANALYSIS_H */ 

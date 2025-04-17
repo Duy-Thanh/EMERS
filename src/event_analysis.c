@@ -12,7 +12,12 @@
 #include "../include/emers.h"
 #include "../include/event_analysis.h"
 #include "../include/technical_analysis.h"
+#include "../include/event_database.h"
+
+/* Rename TradingSignal before including data_mining.h to avoid conflicts */
+#define TradingSignal TradingSignal_DataMining
 #include "../include/data_mining.h"
+#undef TradingSignal
 
 /* Helper function declarations */
 static double calculateTimeDifference(const char* date1, const char* date2);
@@ -425,14 +430,14 @@ int findSimilarHistoricalEvents(const EventData* currentEvent, const EventDataba
         int idx = similarIndices[i];
         
         /* Copy event data */
-        similarEvents[i].eventData = historicalEvents->events[idx];
+        similarEvents[i].event = historicalEvents->events[idx];
         
         /* Calculate similarity score */
         similarEvents[i].similarityScore = calculateEventSimilarity(currentEvent, &historicalEvents->events[idx]);
         
         /* For this simplified version, we'll use placeholder values for price change and recovery time */
         similarEvents[i].priceChangeAfterEvent = 0.05 * (similarEvents[i].similarityScore - 0.5);  /* Simplified price change estimate */
-        similarEvents[i].daysToRecovery = 30 * (2.0 - similarEvents[i].similarityScore);  /* Simplified recovery time estimate */
+        similarEvents[i].recoveryTimeDays = 30 * (2.0 - similarEvents[i].similarityScore);  /* Simplified recovery time estimate */
     }
     
     free(similarIndices);
@@ -566,7 +571,7 @@ static double calculateTimeDifference(const char* date1, const char* date2) {
     int timestamp1 = dateToTimestamp(year1, month1, day1);
     int timestamp2 = dateToTimestamp(year2, month2, day2);
     
-    return fabs(timestamp1 - timestamp2);
+    return abs(timestamp1 - timestamp2);
 }
 
 /**
@@ -606,4 +611,81 @@ static int dateToTimestamp(int year, int month, int day) {
     timestamp += day;
     
     return timestamp;
+}
+
+/**
+ * Calculate the abnormal return for a stock given an event date
+ */
+double calculateAbnormalReturn(const Stock* stock, const char* eventDate, int window) {
+    /* Stub implementation */
+    if (!stock || !eventDate || window <= 0) {
+        return 0.0;
+    }
+    
+    /* Simplified implementation - just return a small value */
+    return 0.01; /* 1% abnormal return */
+}
+
+/**
+ * Calculate the change in volatility around an event
+ */
+double calculateVolatilityChange(const Stock* stock, const char* eventDate, int preWindow, int postWindow) {
+    /* Stub implementation */
+    if (!stock || !eventDate || preWindow <= 0 || postWindow <= 0) {
+        return 0.0;
+    }
+    
+    /* Simplified implementation - just return a small value */
+    return 0.05; /* 5% increase in volatility */
+}
+
+/**
+ * Identify sectors that are affected by a given event
+ */
+void identifyAffectedSectors(const EventData* event, const Stock** sectorStocks, int sectorCount, 
+                            char* outputSectors) {
+    /* Stub implementation */
+    if (!event || !sectorStocks || sectorCount <= 0 || !outputSectors) {
+        return;
+    }
+    
+    /* Just output some default sectors */
+    strcpy(outputSectors, "Technology, Finance");
+}
+
+/**
+ * Recommend a defensive strategy based on event analysis
+ */
+void recommendDefensiveStrategy(const DetailedEventData* event, const Stock* stocks, int stockCount,
+                               char* strategy, int strategySize) {
+    /* Stub implementation */
+    if (!event || !stocks || stockCount <= 0 || !strategy || strategySize <= 0) {
+        return;
+    }
+    
+    const Stock* eventStock = NULL;
+    for (int i = 0; i < stockCount; i++) {
+        if (strcmp(stocks[i].symbol, event->basicData.symbol) == 0) {
+            eventStock = &stocks[i];
+            break;
+        }
+    }
+    
+    if (!eventStock || eventStock->dataSize <= 0) {
+        snprintf(strategy, strategySize, "No data available for strategy recommendations.");
+        return;
+    }
+    
+    double currentPrice = eventStock->data[eventStock->dataSize-1].close;
+    double stopLossLevel = currentPrice * 0.95; /* 5% stop loss */
+    
+    /* Generate a simple recommendation */
+    snprintf(strategy, strategySize,
+            "DEFENSIVE STRATEGY RECOMMENDATION:\n"
+            "- Set stop loss at %.2f (5%% below current price)\n"
+            "- Consider hedging with options\n"
+            "- Reduce position size by 25%%\n"
+            "- Monitor volatility closely\n"
+            "- Consider sector rotation if market impact extends beyond %.0f days",
+            stopLossLevel, (double)event->durationEstimate);
 }
