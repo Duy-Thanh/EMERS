@@ -1,107 +1,185 @@
 /**
- * Data Mining Module
- * Header file for pattern recognition and data mining functions
+ * Data Mining Module Header
+ * Core pattern recognition and data mining functions
+ * FOCUSED VERSION - Core Data Mining Functionality
  */
 
 #ifndef DATA_MINING_H
 #define DATA_MINING_H
 
 #include "emers.h"
-#include "event_database.h"
-#include "event_analysis.h"
 
-/* Constants */
-#define MAX_PATTERNS 10
-#define MAX_ANOMALIES 10
-#define MAX_SIMILAR_EVENTS 10
-#define MAX_STOCKS 20
-#define MAX_HISTORICAL_YEARS 10
+/* Pattern types for price pattern recognition */
+#define PATTERN_UNKNOWN       0
+#define PATTERN_SUPPORT       1
+#define PATTERN_RESISTANCE    2
+#define PATTERN_TREND_CHANGE  3
+#define PATTERN_DOUBLE_TOP    4
+#define PATTERN_DOUBLE_BOTTOM 5
+#define PATTERN_HEAD_SHOULDER 6
 
-/* Pattern types */
-typedef enum {
-    PATTERN_DOUBLE_TOP,
-    PATTERN_DOUBLE_BOTTOM,
-    PATTERN_HEAD_AND_SHOULDERS,
-    PATTERN_TRIANGLE,
-    PATTERN_FLAG,
-    PATTERN_WEDGE,
-    PATTERN_CHANNEL,
-    PATTERN_UNKNOWN
-} PatternType;
+/* Signal types for trading signal detection */
+#define SIGNAL_UNKNOWN        0
+#define SIGNAL_BUY            1
+#define SIGNAL_SELL           2
+#define SIGNAL_HOLD           3
+#define SIGNAL_STOP_LOSS      4
 
-/* Pattern detection result */
+/**
+ * Structure to hold a detected price pattern
+ */
 typedef struct {
-    PatternType type;
-    char description[128];
-    int startIndex;
-    int endIndex;
-    double confidence;
-    double expectedMove;  /* As percentage of current price */
+    char name[32];                /* Pattern name */
+    int type;                     /* Pattern type (see defines above) */
+    char description[128];        /* Human-readable description */
+    int startIndex;               /* Start index in the data array */
+    int endIndex;                 /* End index in the data array */
+    double confidence;            /* Confidence level (0.0-1.0) */
+    double expectedMove;          /* Expected price move (% change) */
 } PatternResult;
 
-/* Similar historical event with outcome data */
+/**
+ * Structure to hold a trading signal
+ */
 typedef struct {
-    EventData eventData;
-    double similarityScore;
-    double priceChangeAfterEvent;
-    int daysToRecovery;
-} SimilarHistoricalEvent;
+    int type;                     /* Signal type (see defines above) */
+    char description[128];        /* Signal description */
+    int signalIndex;              /* Index in data where signal occurs */
+    double confidence;            /* Confidence level (0.0-1.0) */
+    double entryPrice;            /* Suggested entry price */
+    double targetPrice;           /* Target price for take profit */
+    double stopLossPrice;         /* Suggested stop loss price */
+    double riskRewardRatio;       /* Risk/reward ratio */
+} TradingSignal;
 
-/* Historical data mining result */
+/**
+ * Structure to hold anomaly detection results
+ */
 typedef struct {
-    char symbol[MAX_SYMBOL_LENGTH];
-    double meanReturn;           /* Average daily return */
-    double annualizedReturn;     /* Annualized return */
-    double volatility;           /* Historical volatility */
-    double maxDrawdown;          /* Maximum drawdown */
-    double sharpeRatio;          /* Sharpe ratio */
-    double correlationWithMarket; /* Correlation with market index */
-    int totalTradingDays;        /* Total data points analyzed */
-    int patterns[8];             /* Count of each pattern type */
-    double avgPatternReturn;     /* Average return following pattern formation */
-    double bestDay;              /* Best single-day return */
-    double worstDay;             /* Worst single-day return */
-    char bestDayDate[MAX_DATE_LENGTH];
-    char worstDayDate[MAX_DATE_LENGTH];
+    int index;                    /* Index in data where anomaly occurs */
+    double score;                 /* Anomaly score (higher is more anomalous) */
+    double priceDeviation;        /* Price deviation in standard deviations */
+    double volumeDeviation;       /* Volume deviation in standard deviations */
+    char description[128];        /* Human-readable description */
+} AnomalyResult;
+
+/**
+ * Structure to hold historical analysis results
+ */
+typedef struct {
+    char symbol[16];              /* Stock symbol */
+    double meanReturn;            /* Mean daily return */
+    double annualizedReturn;      /* Annualized return */
+    double volatility;            /* Annualized volatility */
+    double maxDrawdown;           /* Maximum drawdown */
+    double sharpeRatio;           /* Sharpe ratio */
+    int totalTradingDays;         /* Total trading days analyzed */
+    double bestDay;               /* Best daily return */
+    double worstDay;              /* Worst daily return */
+    char bestDayDate[16];         /* Date of best day */
+    char worstDayDate[16];        /* Date of worst day */
 } HistoricalAnalysis;
 
-/* Statistical significance result */
-typedef struct {
-    double pValue;
-    int significantAt95pct;
-    int significantAt99pct;
-    double effectSize;
-    double confidenceInterval[2];
-} StatisticalResult;
-
-/* Pattern recognition functions */
+/**
+ * CORE ALGORITHM 1: Detect price patterns using pattern recognition
+ * Focuses on support/resistance levels, trend changes, and double tops/bottoms
+ * 
+ * @param data Pointer to stock data array
+ * @param dataSize Number of elements in data array
+ * @param patterns Array to store detected patterns
+ * @param maxPatterns Maximum number of patterns to detect
+ * @return Number of patterns detected
+ */
 int detectPricePatterns(const StockData* data, int dataSize, PatternResult* patterns, int maxPatterns);
 
-/* Time series similarity measures */
-double calculateEuclideanDistance(const double* series1, const double* series2, int length);
-double calculatePearsonCorrelation(const double* series1, const double* series2, int length);
-double calculateDTW(const double* series1, int length1, const double* series2, int length2);
+/**
+ * CORE ALGORITHM 2: SMA Crossover Signal Detection
+ * Detects trading signals based on SMA crossovers
+ * 
+ * @param data Pointer to stock data array
+ * @param dataSize Number of elements in data array
+ * @param shortPeriod Period for short SMA
+ * @param longPeriod Period for long SMA
+ * @param signals Array to store detected signals
+ * @param maxSignals Maximum number of signals to detect
+ * @return Number of signals detected
+ */
+int detectSMACrossoverSignals(const StockData* data, int dataSize, int shortPeriod, int longPeriod, 
+                              TradingSignal* signals, int maxSignals);
 
-/* Volatility prediction functions */
-double predictVolatility(const StockData* data, int dataSize, int horizon);
-double predictVolatilityEWMA(const StockData* data, int dataSize, int lookback);
-double predictVolatilityGARCH(const StockData* data, int dataSize, int horizon);
+/**
+ * Calculate simple volatility for a lookback period
+ * Annualized standard deviation of returns
+ * 
+ * @param data Pointer to stock data array
+ * @param dataSize Number of elements in data array
+ * @param lookback Number of days to look back
+ * @return Annualized volatility
+ */
+double calculateSimpleVolatility(const StockData* data, int dataSize, int lookback);
 
-/* Anomaly detection functions */
+/**
+ * CORE ALGORITHM 3: Anomaly Detection
+ * Calculate a simple anomaly score based on price and volume movements
+ * 
+ * @param data Pointer to stock data array
+ * @param dataSize Number of elements in data array
+ * @return Anomaly score (higher is more anomalous)
+ */
 double calculateAnomalyScore(const StockData* data, int dataSize);
-int detectAnomalies(const StockData* data, int dataSize, int* anomalyIndices, int maxAnomalies);
 
-/* Event similarity analysis functions */
-int findSimilarHistoricalEvents(const EventData* currentEvent, const EventDatabase* historicalEvents, 
-                     SimilarHistoricalEvent* similarEvents, int maxResults);
-double predictEventOutcome(const EventData* event, const SimilarHistoricalEvent* similarEvents, int count);
+/**
+ * Detect anomalies in price and volume data
+ * Enhanced to provide more detailed anomaly information
+ * 
+ * @param data Pointer to stock data array
+ * @param dataSize Number of elements in data array
+ * @param anomalies Array to store detected anomalies
+ * @param maxAnomalies Maximum number of anomalies to detect
+ * @return Number of anomalies detected
+ */
+int detectAnomalies(const StockData* data, int dataSize, AnomalyResult* anomalies, int maxAnomalies);
 
-/* Historical data mining with CSV cache */
+/**
+ * Calculate the Euclidean distance between two time series
+ * 
+ * @param series1 First time series
+ * @param series2 Second time series
+ * @param length Length of time series
+ * @return Euclidean distance
+ */
+double calculateEuclideanDistance(const double* series1, const double* series2, int length);
+
+/**
+ * Calculate the Pearson correlation coefficient between two time series
+ * 
+ * @param series1 First time series
+ * @param series2 Second time series
+ * @param length Length of time series
+ * @return Pearson correlation coefficient
+ */
+double calculatePearsonCorrelation(const double* series1, const double* series2, int length);
+
+/**
+ * Analyze price momentum to detect overbought/oversold conditions
+ * 
+ * @param data Pointer to stock data array
+ * @param dataSize Number of elements in data array
+ * @param period Period for momentum calculation
+ * @param threshold Threshold for overbought/oversold
+ * @return 1 for overbought, -1 for oversold, 0 for neutral
+ */
+int analyzePriceMomentum(const StockData* data, int dataSize, int period, double threshold);
+
+/**
+ * Fetch and analyze historical data for a stock symbol
+ * 
+ * @param symbol Stock symbol
+ * @param startDate Start date (YYYY-MM-DD)
+ * @param endDate End date (YYYY-MM-DD)
+ * @param result Pointer to store analysis results
+ * @return 0 on success, negative on error
+ */
 int fetchAndAnalyzeHistoricalData(const char* symbol, const char* startDate, const char* endDate, HistoricalAnalysis* result);
-int batchAnalyzeHistoricalData(const char** symbols, int symbolCount, const char* startDate, const char* endDate, HistoricalAnalysis* results);
-int calculateCorrelationMatrix(const char** symbols, int symbolCount, const char* startDate, const char* endDate, double** correlationMatrix);
-int calculateStatisticalSignificance(const StockData* data1, int dataSize1, const StockData* data2, int dataSize2, StatisticalResult* result);
-int findSeasonalPatterns(const StockData* data, int dataSize, PatternResult* patterns, int maxPatterns);
-int testTradingStrategy(const StockData* data, int dataSize, const char* strategyParams, double* returnRate, double* sharpeRatio);
 
 #endif /* DATA_MINING_H */
