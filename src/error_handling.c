@@ -154,6 +154,19 @@ void logMessage(LogLevel level, const char* format, ...) {
     }
 }
 
+/* Log a warning message */
+void logWarning(const char* format, ...) {
+    /* Format the message */
+    char message[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    
+    /* Log the warning message using LOG_WARNING level */
+    logMessage(LOG_WARNING, "%s", message);
+}
+
 /* Log an error with an error code */
 void logError(int errorCode, const char* format, ...) {
     /* Store the error code */
@@ -241,4 +254,4 @@ void assertCondition(int condition, const char* message,
         abort();
 #endif
     }
-} 
+}

@@ -18,7 +18,7 @@
 #include "../include/tiingo_api.h"
 #include "../include/error_handling.h"  /* Added error_handling.h for logAPIError */
 
-/* Define SUCCESS constant if not already defined */
+/* Define SUCCESS constant if not already defined */    
 #ifndef SUCCESS
 #define SUCCESS 0
 #endif
@@ -156,16 +156,29 @@ int performAPIRequest(const char* url, Memory* response) {
     response->size = 0;
     response->data[0] = '\0';
     
-    /* Build curl command */
+    /* Build curl command - simplify and make more robust */
     char command[MAX_BUFFER_SIZE];
     snprintf(command, sizeof(command),
-             "curl -s -H \"Authorization: Token %s\" -H \"Content-Type: application/json\" \"%s\" > curl_output.json",
+             "curl -s -S -f -H \"Authorization: Token %s\" -H \"Content-Type: application/json\" \"%s\" > curl_output.json 2> curl_error.txt",
              apiKey, url);
     
     /* Execute curl command */
     int result = system(command);
     if (result != 0) {
+        FILE* error_file = fopen("curl_error.txt", "r");
+        char error_msg[256] = "Unknown curl error";
+        
+        if (error_file) {
+            if (fgets(error_msg, sizeof(error_msg), error_file)) {
+                /* Remove newline character if present */
+                char* newline = strchr(error_msg, '\n');
+                if (newline) *newline = '\0';
+            }
+            fclose(error_file);
+        }
+        
         printf("Error: Failed to execute curl command. Error code: %d\n", result);
+        logError(ERR_CURL_FAILED, "Failed to execute curl command. Error: %s", error_msg);
         free(response->data);
         response->data = NULL;
         return 0;
@@ -175,6 +188,7 @@ int performAPIRequest(const char* url, Memory* response) {
     FILE* fp = fopen("curl_output.json", "rb");
     if (!fp) {
         printf("Error: Failed to open curl output file.\n");
+        logError(ERR_FILE_ACCESS, "Failed to open curl output file");
         free(response->data);
         response->data = NULL;
         return 0;
@@ -187,6 +201,7 @@ int performAPIRequest(const char* url, Memory* response) {
     
     if (fileSize <= 0) {
         printf("Error: Empty response from API or failed request.\n");
+        logError(ERR_API_RESPONSE_EMPTY, "Empty response from API");
         fclose(fp);
         free(response->data);
         response->data = NULL;
@@ -197,6 +212,7 @@ int performAPIRequest(const char* url, Memory* response) {
     char* newData = (char*)realloc(response->data, fileSize + 1);
     if (!newData) {
         printf("Error: Memory reallocation failed for response\n");
+        logError(ERR_OUT_OF_MEMORY, "Memory reallocation failed for API response");
         fclose(fp);
         free(response->data);
         response->data = NULL;
@@ -211,6 +227,7 @@ int performAPIRequest(const char* url, Memory* response) {
     if (bytesRead != (size_t)fileSize) {
         printf("Error: Failed to read complete curl output. Expected %ld bytes, got %zu bytes.\n", 
                fileSize, bytesRead);
+        logError(ERR_FILE_READ, "Failed to read complete curl output file");
         free(response->data);
         response->data = NULL;
         return 0;
@@ -219,6 +236,23 @@ int performAPIRequest(const char* url, Memory* response) {
     /* Null-terminate the response data */
     response->data[bytesRead] = '\0';
     response->size = bytesRead;
+    
+    /* Check if the response contains valid JSON */
+    cJSON *testJson = cJSON_Parse(response->data);
+    if (!testJson) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr) {
+            printf("Error: Invalid JSON response: %s\n", error_ptr);
+            logError(ERR_DATA_CORRUPTED, "Invalid JSON response: %s", error_ptr);
+        } else {
+            printf("Error: Invalid JSON response\n");
+            logError(ERR_DATA_CORRUPTED, "Invalid JSON response");
+        }
+        free(response->data);
+        response->data = NULL;
+        return 0;
+    }
+    cJSON_Delete(testJson);
     
     /* Check for HTTP errors in the response */
     if (strstr(response->data, "\"error\"") != NULL || 
@@ -270,37 +304,41 @@ int fetchStockData(const char* symbol, const char* startDate, const char* endDat
         return 0;
     }
     
-    /* Allocate memory for stock data if it hasn't been allocated yet
-       or increase capacity if needed */
-    int initialCapacity = 100; // Reasonable initial size
-    if (stock->data == NULL) {
-        stock->data = (StockData*)malloc(initialCapacity * sizeof(StockData));
-        if (!stock->data) {
-            logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for stock data");
-            free(response.data);
-            return 0;
-        }
-        stock->dataCapacity = initialCapacity;
-        stock->dataSize = 0;
-    } else if (stock->dataCapacity <= stock->dataSize) {
-        /* Need to expand capacity */
-        int newCapacity = stock->dataCapacity * 2;
-        StockData* newData = (StockData*)realloc(stock->data, newCapacity * sizeof(StockData));
-        if (!newData) {
-            logError(ERR_OUT_OF_MEMORY, "Failed to reallocate memory for stock data");
-            free(response.data);
-            return 0;
-        }
-        stock->data = newData;
-        stock->dataCapacity = newCapacity;
-    }
-    
     /* Parse JSON response */
-    success = parseStockDataJSON(response.data, stock->data + stock->dataSize, stock->dataCapacity - stock->dataSize);
+    StockData* dataArray = NULL;
+    int dataCount = 0;
+    success = parseStockDataJSON(response.data, &dataArray, &dataCount);
     
-    if (success > 0) {
-        /* Update the data size with the number of items parsed */
-        stock->dataSize += success;
+    if (success && dataArray) {
+        /* Allocate memory for stock data if it hasn't been allocated yet
+           or increase capacity if needed */
+        if (stock->data == NULL) {
+            stock->data = (StockData*)malloc(dataCount * sizeof(StockData));
+            if (!stock->data) {
+                logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for stock data");
+                free(dataArray);
+                free(response.data);
+                return 0;
+            }
+            stock->dataCapacity = dataCount;
+            stock->dataSize = 0;
+        } else if (stock->dataCapacity < dataCount) {
+            /* Need to expand capacity */
+            StockData* newData = (StockData*)realloc(stock->data, dataCount * sizeof(StockData));
+            if (!newData) {
+                logError(ERR_OUT_OF_MEMORY, "Failed to reallocate memory for stock data");
+                free(dataArray);
+                free(response.data);
+                return 0;
+            }
+            stock->data = newData;
+            stock->dataCapacity = dataCount;
+        }
+        
+        /* Copy parsed data to stock structure */
+        memcpy(stock->data, dataArray, dataCount * sizeof(StockData));
+        stock->dataSize = dataCount;
+        free(dataArray);
     }
     
     /* Clean up */
@@ -309,201 +347,176 @@ int fetchStockData(const char* symbol, const char* startDate, const char* endDat
     return success;
 }
 
-/* Parse JSON response from Tiingo API for stock data */
-int parseStockDataJSON(const char* jsonData, StockData* data, int maxItems) {
-    if (!jsonData || !data || maxItems <= 0) {
+/* Parse the JSON response from Tiingo API and extract stock data */
+int parseStockDataJSON(const char* jsonData, StockData** dataArray, int* dataCount) {
+    if (!jsonData || !dataArray || !dataCount) {
         logError(ERR_INVALID_PARAMETER, "Invalid parameters for parseStockDataJSON");
         return 0;
     }
-
-    /* Use cJSON to parse the API response */
-    cJSON *json = cJSON_Parse(jsonData);
+    
+    *dataArray = NULL;
+    *dataCount = 0;
+    
+    cJSON* json = cJSON_Parse(jsonData);
     if (!json) {
-        const char* errorPtr = cJSON_GetErrorPtr();
-        if (errorPtr) {
-            logError(ERR_DATA_CORRUPTED, "JSON parsing error: %s", errorPtr);
+        const char* error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr) {
+            logError(ERR_DATA_CORRUPTED, "JSON parsing failed at: %s", error_ptr);
         } else {
-            logError(ERR_DATA_CORRUPTED, "Unknown JSON parsing error");
+            logError(ERR_DATA_CORRUPTED, "JSON parsing failed with unknown error");
         }
         return 0;
     }
-
-    /* Check if the response is an error message or empty */
-    if (cJSON_IsObject(json)) {
-        cJSON *errorObj = cJSON_GetObjectItemCaseSensitive(json, "error");
-        cJSON *messageObj = cJSON_GetObjectItemCaseSensitive(json, "message");
-        
-        if (cJSON_IsString(errorObj) || cJSON_IsString(messageObj)) {
-            char errorMsg[256] = "Unknown API error";
-            
-            if (cJSON_IsString(errorObj) && errorObj->valuestring) {
-                snprintf(errorMsg, sizeof(errorMsg), "API error: %s", errorObj->valuestring);
-            } else if (cJSON_IsString(messageObj) && messageObj->valuestring) {
-                snprintf(errorMsg, sizeof(errorMsg), "API message: %s", messageObj->valuestring);
+    
+    /* Tiingo API can return either a single object or an array of objects */
+    cJSON* dataItems = NULL;
+    
+    /* Check if the root is an array */
+    if (cJSON_IsArray(json)) {
+        dataItems = json;
+    } 
+    /* Check if the root is an object that contains a data array */
+    else if (cJSON_IsObject(json)) {
+        /* Check common response formats */
+        cJSON* data = cJSON_GetObjectItem(json, "data");
+        if (data && cJSON_IsArray(data)) {
+            dataItems = data;
+        }
+        /* Some Tiingo endpoints return an object with date fields directly */
+        else if (cJSON_GetObjectItem(json, "date") != NULL) {
+            /* Treat the single object as a one-item array */
+            dataItems = json;
+            /* Create a temporary array to hold this single item */
+            cJSON* tempArray = cJSON_CreateArray();
+            if (tempArray) {
+                cJSON* cloned = cJSON_Duplicate(json, 1);
+                if (cloned) {
+                    cJSON_AddItemToArray(tempArray, cloned);
+                    dataItems = tempArray;
+                } else {
+                    cJSON_Delete(tempArray);
+                    logError(ERR_OUT_OF_MEMORY, "Failed to clone JSON object");
+                    cJSON_Delete(json);
+                    return 0;
+                }
+            } else {
+                logError(ERR_OUT_OF_MEMORY, "Failed to create temporary JSON array");
+                cJSON_Delete(json);
+                return 0;
             }
-            
-            /* Check for specific types of errors */
-            if (strstr(jsonData, "api_key") || strstr(jsonData, "token")) {
-                logError(ERR_API_RESPONSE_INVALID, "API key error: %s", errorMsg);
-            } 
-            else if (strstr(jsonData, "not found") || strstr(jsonData, "notFound")) {
-                logError(ERR_API_RESPONSE_INVALID, "Ticker not found: %s", errorMsg);
-            }
-            else {
-                logError(ERR_API_REQUEST_FAILED, "API error: %s", errorMsg);
-            }
-            
+        }
+        else {
+            /* If we didn't find any known array structure, log and fail */
+            logError(ERR_DATA_CORRUPTED, "Invalid JSON format: array not found");
             cJSON_Delete(json);
             return 0;
         }
-    }
-
-    /* Determine if we're dealing with a single object response or an array */
-    cJSON *priceArray = NULL;
-    
-    if (cJSON_IsArray(json)) {
-        priceArray = json;
-    } else if (cJSON_IsObject(json)) {
-        /* For single ticker responses, the data might be directly in the object */
-        /* First, check if this is a single price object with fields like 'close', 'open', etc. */
-        cJSON *closeObj = cJSON_GetObjectItemCaseSensitive(json, "close");
-        if (cJSON_IsNumber(closeObj)) {
-            /* This appears to be a single price entry - treat as an array of one */
-            priceArray = cJSON_CreateArray();
-            cJSON_AddItemToArray(priceArray, cJSON_Duplicate(json, 1));
-        } else {
-            /* Check for common fields that might contain the price array */
-            cJSON *dataObj = cJSON_GetObjectItemCaseSensitive(json, "data");
-            if (dataObj && cJSON_IsArray(dataObj)) {
-                priceArray = dataObj;
-            } else {
-                cJSON *pricesObj = cJSON_GetObjectItemCaseSensitive(json, "prices");
-                if (pricesObj && cJSON_IsArray(pricesObj)) {
-                    priceArray = pricesObj;
-                } else {
-                    cJSON *resultObj = cJSON_GetObjectItemCaseSensitive(json, "result");
-                    if (resultObj && cJSON_IsArray(resultObj)) {
-                        priceArray = resultObj;
-                    }
-                }
-            }
-        }
-    }
-
-    if (!priceArray) {
-        logError(ERR_DATA_CORRUPTED, "Invalid stock data JSON format: can't find price data");
-        if (priceArray != json) {
-            cJSON_Delete(priceArray);  /* Only delete if we created it */
-        }
+    } else {
+        logError(ERR_DATA_CORRUPTED, "JSON response is neither an object nor an array");
         cJSON_Delete(json);
         return 0;
     }
-
-    /* Extract price data */
-    int count = 0;
-    int arraySize = cJSON_GetArraySize(priceArray);
     
-    for (int i = 0; i < arraySize && count < maxItems; i++) {
-        cJSON *item = cJSON_GetArrayItem(priceArray, i);
-        if (!cJSON_IsObject(item)) {
-            continue;  /* Skip non-object items */
-        }
+    /* Count items in the array */
+    int itemCount = cJSON_GetArraySize(dataItems);
+    if (itemCount <= 0) {
+        logError(ERR_DATA_CORRUPTED, "Failed to parse any data points from JSON response");
+        cJSON_Delete(json);
+        return 0;
+    }
+    
+    /* Allocate memory for stock data array */
+    StockData* stockData = (StockData*)malloc(itemCount * sizeof(StockData));
+    if (!stockData) {
+        logError(ERR_OUT_OF_MEMORY, "Memory allocation failed for stock data array");
+        cJSON_Delete(json);
+        return 0;
+    }
+    
+    /* Process each item in the array */
+    int validItems = 0;
+    for (int i = 0; i < itemCount; i++) {
+        cJSON* item = cJSON_GetArrayItem(dataItems, i);
+        if (!item) continue;
+        
+        /* Initialize with default values */
+        memset(&stockData[validItems], 0, sizeof(StockData));
+        stockData[validItems].date[0] = '\0';
+        stockData[validItems].open = 0.0;
+        stockData[validItems].high = 0.0;
+        stockData[validItems].low = 0.0;
+        stockData[validItems].close = 0.0;
+        stockData[validItems].volume = 0;
         
         /* Extract date */
-        cJSON *dateObj = cJSON_GetObjectItemCaseSensitive(item, "date");
-        if (!cJSON_IsString(dateObj)) {
-            /* Try alternate date fields */
-            dateObj = cJSON_GetObjectItemCaseSensitive(item, "datetime");
-            if (!cJSON_IsString(dateObj)) {
-                dateObj = cJSON_GetObjectItemCaseSensitive(item, "timestamp");
-            }
+        cJSON* dateField = cJSON_GetObjectItem(item, "date");
+        if (dateField && cJSON_IsString(dateField) && dateField->valuestring) {
+            strncpy(stockData[validItems].date, dateField->valuestring, sizeof(stockData[validItems].date) - 1);
+            stockData[validItems].date[sizeof(stockData[validItems].date) - 1] = '\0';
         }
-
-        if (cJSON_IsString(dateObj) && dateObj->valuestring) {
-            strncpy(data[count].date, dateObj->valuestring, sizeof(data[count].date) - 1);
-            data[count].date[sizeof(data[count].date) - 1] = '\0';
-            
-            /* Truncate time part if present */
-            char *timePos = strchr(data[count].date, 'T');
-            if (timePos != NULL) {
-                *timePos = '\0';
-            }
-        } else {
-            /* Use current date if not available */
-            time_t now = time(NULL);
-            struct tm *timeinfo = localtime(&now);
-            strftime(data[count].date, sizeof(data[count].date), "%Y-%m-%d", timeinfo);
+        
+        /* Extract price data - handle different possible field names */
+        cJSON* open = cJSON_GetObjectItem(item, "open");
+        if (!open) open = cJSON_GetObjectItem(item, "openPrice");
+        if (open && cJSON_IsNumber(open)) {
+            stockData[validItems].open = open->valuedouble;
         }
-
-        /* Extract open price */
-        cJSON *openObj = cJSON_GetObjectItemCaseSensitive(item, "open");
-        if (cJSON_IsNumber(openObj)) {
-            data[count].open = (float)openObj->valuedouble;
-        } else {
-            data[count].open = 0.0f;
+        
+        cJSON* high = cJSON_GetObjectItem(item, "high");
+        if (!high) high = cJSON_GetObjectItem(item, "highPrice");
+        if (high && cJSON_IsNumber(high)) {
+            stockData[validItems].high = high->valuedouble;
         }
-
-        /* Extract high price */
-        cJSON *highObj = cJSON_GetObjectItemCaseSensitive(item, "high");
-        if (cJSON_IsNumber(highObj)) {
-            data[count].high = (float)highObj->valuedouble;
-        } else {
-            data[count].high = 0.0f;
+        
+        cJSON* low = cJSON_GetObjectItem(item, "low");
+        if (!low) low = cJSON_GetObjectItem(item, "lowPrice");
+        if (low && cJSON_IsNumber(low)) {
+            stockData[validItems].low = low->valuedouble;
         }
-
-        /* Extract low price */
-        cJSON *lowObj = cJSON_GetObjectItemCaseSensitive(item, "low");
-        if (cJSON_IsNumber(lowObj)) {
-            data[count].low = (float)lowObj->valuedouble;
-        } else {
-            data[count].low = 0.0f;
+        
+        cJSON* close = cJSON_GetObjectItem(item, "close");
+        if (!close) close = cJSON_GetObjectItem(item, "closePrice");
+        if (!close) close = cJSON_GetObjectItem(item, "adjClose");
+        if (close && cJSON_IsNumber(close)) {
+            stockData[validItems].close = close->valuedouble;
         }
-
-        /* Extract close price */
-        cJSON *closeObj = cJSON_GetObjectItemCaseSensitive(item, "close");
-        if (cJSON_IsNumber(closeObj)) {
-            data[count].close = (float)closeObj->valuedouble;
-        } else {
-            data[count].close = 0.0f;
+        
+        cJSON* volume = cJSON_GetObjectItem(item, "volume");
+        if (!volume) volume = cJSON_GetObjectItem(item, "adjVolume");
+        if (volume && cJSON_IsNumber(volume)) {
+            stockData[validItems].volume = (long)volume->valuedouble;
         }
-
-        /* Extract volume */
-        cJSON *volumeObj = cJSON_GetObjectItemCaseSensitive(item, "volume");
-        if (cJSON_IsNumber(volumeObj)) {
-            data[count].volume = (long)volumeObj->valuedouble;
-        } else {
-            data[count].volume = 0;
+        
+        /* Only count the item if we have at least a date and close price */
+        if (stockData[validItems].date[0] != '\0' && stockData[validItems].close > 0) {
+            validItems++;
         }
-
-        /* Extract adjusted close if available */
-        cJSON *adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjClose");
-        if (!cJSON_IsNumber(adjCloseObj)) {
-            adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjclose");
-            if (!cJSON_IsNumber(adjCloseObj)) {
-                adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjusted_close");
-                if (!cJSON_IsNumber(adjCloseObj)) {
-                    adjCloseObj = cJSON_GetObjectItemCaseSensitive(item, "adjustedClose");
-                }
-            }
-        }
-
-        if (cJSON_IsNumber(adjCloseObj)) {
-            data[count].adjClose = (float)adjCloseObj->valuedouble;
-        } else {
-            /* If adjusted close is not available, use regular close */
-            data[count].adjClose = data[count].close;
-        }
-
-        count++;
     }
-
-    /* Clean up */
-    if (priceArray != json && priceArray != NULL) {
-        cJSON_Delete(priceArray);  /* Only delete if we created it */
+    
+    /* Handle the case where we didn't parse any valid items */
+    if (validItems == 0) {
+        free(stockData);
+        logError(ERR_DATA_CORRUPTED, "No valid data points found in JSON response");
+        cJSON_Delete(json);
+        return 0;
     }
+    
+    /* If we have fewer valid items than the total, resize the array */
+    if (validItems < itemCount) {
+        StockData* resized = (StockData*)realloc(stockData, validItems * sizeof(StockData));
+        if (resized) {
+            stockData = resized;
+        } else {
+            /* If realloc fails, we can still proceed with the original array */
+            logWarning("Memory reallocation failed for stock data array resizing");
+        }
+    }
+    
+    *dataArray = stockData;
+    *dataCount = validItems;
+    
     cJSON_Delete(json);
-
-    return count;
+    return 1;
 }
 
 /**
@@ -524,72 +537,44 @@ int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     }
 
     char responseBuffer[MAX_BUFFER_SIZE];
-    // First try with marketaux API which is more reliable for news
-    char curlCmd[1024];
     char tempFilePath[256];
     getTempFilePath(tempFilePath, sizeof(tempFilePath), "news_response.json");
     
-    // Removed the problematic --dns-servers option
+    // Use a simpler curl command with no problematic options
+    char curlCmd[1024];
     snprintf(curlCmd, sizeof(curlCmd),
-        "curl -s -o \"%s\" -w \"%%{http_code}\" "
-        "\"https://api.marketaux.com/v1/news/all?symbols=%s&filter_entities=true&language=en&api_token=%s&limit=50\"",
+        "curl -s -o \"%s\" \"https://api.marketaux.com/v1/news/all?symbols=%s&filter_entities=true&language=en&api_token=%s&limit=50\" 2> curl_error.txt",
         tempFilePath, symbols, marketauxKey);
     
-    char statusCodeStr[8] = {0};
-    FILE* fp = popen(curlCmd, "r");
-    if (!fp) {
-        logError(ERR_API_REQUEST_FAILED, "Failed to execute curl command");
+    int result = system(curlCmd);
+    if (result != 0) {
+        // Read error message if any
+        FILE* error_file = fopen("curl_error.txt", "r");
+        char error_msg[256] = "Unknown curl error";
         
-        // Try an even simpler fallback command if the first one fails
-        snprintf(curlCmd, sizeof(curlCmd),
-            "curl -s \"https://api.marketaux.com/v1/news/all?symbols=%s&api_token=%s&limit=10\" -o \"%s\"",
-            symbols, marketauxKey, tempFilePath);
-        
-        system(curlCmd);
-        goto read_response;
-    }
-    
-    if (fgets(statusCodeStr, sizeof(statusCodeStr), fp) == NULL) {
-        pclose(fp);
-        logError(ERR_API_REQUEST_FAILED, "Failed to read curl output");
-        
-        // Try an even simpler fallback command
-        snprintf(curlCmd, sizeof(curlCmd),
-            "curl -s \"https://api.marketaux.com/v1/news/all?symbols=%s&api_token=%s&limit=10\" -o \"%s\"",
-            symbols, marketauxKey, tempFilePath);
-        
-        system(curlCmd);
-        goto read_response;
-    }
-    
-    int statusCode = atoi(statusCodeStr);
-    pclose(fp);
-    
-    if (statusCode != 200) {
-        // Log specific error based on status code
-        if (statusCode == 403) {
-            logError(ERR_API_REQUEST_FAILED, "API permission error: Your API key doesn't have access to this feature - URL: https://api.marketaux.com/v1/news/all, Status: %d", statusCode);
-        } else if (statusCode == 429) {
-            logError(ERR_API_REQUEST_FAILED, "API rate limit exceeded - URL: https://api.marketaux.com/v1/news/all, Status: %d", statusCode);
-        } else {
-            logError(ERR_API_REQUEST_FAILED, "API request failed with status code %d - URL: https://api.marketaux.com/v1/news/all", statusCode);
+        if (error_file) {
+            if (fgets(error_msg, sizeof(error_msg), error_file)) {
+                /* Remove newline character if present */
+                char* newline = strchr(error_msg, '\n');
+                if (newline) *newline = '\0';
+            }
+            fclose(error_file);
         }
         
-        // Try fallback to Tiingo if MarketAux fails
+        logError(ERR_API_REQUEST_FAILED, "Failed to execute curl command: %s", error_msg);
+        
+        // Try fallback to Tiingo API
         if (apiKey && strlen(apiKey) > 0) {
+            logMessage(LOG_INFO, "Trying fallback to Tiingo API for news data");
             snprintf(curlCmd, sizeof(curlCmd),
-                "curl -s \"https://api.tiingo.com/tiingo/news?tickers=%s&limit=50&format=json\" "
-                "-H \"Authorization: Token %s\" -o \"%s\"",
-                symbols, apiKey, tempFilePath);
+                "curl -s -o \"%s\" \"https://api.tiingo.com/tiingo/news?tickers=%s&limit=50&format=json\" "
+                "-H \"Authorization: Token %s\" 2> curl_error.txt",
+                tempFilePath, symbols, apiKey);
             
             system(curlCmd);
-        } else {
-            // Even if the request failed, let's check if we have a response file with content
-            goto read_response;
         }
     }
 
-read_response:
     // Read the response from the temp file
     FILE* responseFile = fopen(tempFilePath, "r");
     if (!responseFile) {
@@ -607,13 +592,13 @@ read_response:
     
     responseBuffer[bytesRead] = '\0';
     
-    // Verify we got valid JSON by checking for opening brackets
-    if (responseBuffer[0] != '{' && responseBuffer[0] != '[') {
-        logError(ERR_DATA_CORRUPTED, "Invalid JSON response: %s", 
-            strlen(responseBuffer) > 100 ? 
-            "Response too large to display" : responseBuffer);
+    // Test the JSON response
+    cJSON* testJson = cJSON_Parse(responseBuffer);
+    if (!testJson) {
+        logError(ERR_DATA_CORRUPTED, "Invalid JSON in response");
         return ERR_DATA_CORRUPTED;
     }
+    cJSON_Delete(testJson);
     
     // Parse the news data and add it to the events database
     int count = parseNewsDataJSON(responseBuffer, events);

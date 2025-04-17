@@ -66,7 +66,7 @@ int fetchHistoricalDataWithCache(const char* symbol, const char* startDate, cons
 char* generateCSVFilename(const char* symbol, const char* startDate, const char* endDate);
 
 /* JSON parsing functions */
-int parseStockDataJSON(const char* jsonData, StockData* data, int maxItems);
+int parseStockDataJSON(const char* jsonData, StockData** dataArray, int* dataCount);
 int parseNewsDataJSON(const char* jsonData, EventDatabase* events);
 
 /* Sentiment analysis and impact scoring functions */
