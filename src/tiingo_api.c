@@ -270,8 +270,38 @@ int fetchStockData(const char* symbol, const char* startDate, const char* endDat
         return 0;
     }
     
+    /* Allocate memory for stock data if it hasn't been allocated yet
+       or increase capacity if needed */
+    int initialCapacity = 100; // Reasonable initial size
+    if (stock->data == NULL) {
+        stock->data = (StockData*)malloc(initialCapacity * sizeof(StockData));
+        if (!stock->data) {
+            logError(ERR_OUT_OF_MEMORY, "Failed to allocate memory for stock data");
+            free(response.data);
+            return 0;
+        }
+        stock->dataCapacity = initialCapacity;
+        stock->dataSize = 0;
+    } else if (stock->dataCapacity <= stock->dataSize) {
+        /* Need to expand capacity */
+        int newCapacity = stock->dataCapacity * 2;
+        StockData* newData = (StockData*)realloc(stock->data, newCapacity * sizeof(StockData));
+        if (!newData) {
+            logError(ERR_OUT_OF_MEMORY, "Failed to reallocate memory for stock data");
+            free(response.data);
+            return 0;
+        }
+        stock->data = newData;
+        stock->dataCapacity = newCapacity;
+    }
+    
     /* Parse JSON response */
-    success = parseStockDataJSON(response.data, stock->data, stock->dataCapacity - stock->dataSize);
+    success = parseStockDataJSON(response.data, stock->data + stock->dataSize, stock->dataCapacity - stock->dataSize);
+    
+    if (success > 0) {
+        /* Update the data size with the number of items parsed */
+        stock->dataSize += success;
+    }
     
     /* Clean up */
     free(response.data);
@@ -499,7 +529,7 @@ int fetchNewsFeed(const char* symbols, EventDatabase* events) {
     char tempFilePath[256];
     getTempFilePath(tempFilePath, sizeof(tempFilePath), "news_response.json");
     
-    // Use a simpler curl command without the DNS option that might cause issues
+    // Removed the problematic --dns-servers option
     snprintf(curlCmd, sizeof(curlCmd),
         "curl -s -o \"%s\" -w \"%%{http_code}\" "
         "\"https://api.marketaux.com/v1/news/all?symbols=%s&filter_entities=true&language=en&api_token=%s&limit=50\"",

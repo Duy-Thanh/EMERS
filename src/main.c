@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
     printf("Fetching news data for symbols: %s\n", symbolList);
     
     /* Fetch news feed */
-    if (!fetchNewsFeed(symbolList, &newsEvents)) {
+    if (fetchNewsFeed(symbolList, &newsEvents) != ERR_SUCCESS) {
         printf("Error: Failed to fetch news data.\n");
         return 1;
     }
