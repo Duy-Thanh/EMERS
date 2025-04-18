@@ -370,6 +370,22 @@ public class StockPredictGUI extends JFrame {
     
     // Event handler methods
     
+    /**
+     * Opens a file chooser dialog and loads CSV stock data from the selected file
+     * Mở hộp thoại chọn tệp và tải dữ liệu chứng khoán CSV từ tệp đã chọn
+     * 
+     * Process:
+     * 1. Opens a file chooser dialog configured for CSV files
+     * 2. If user selects a file, tries to load the stock data
+     * 3. Updates the price chart with the loaded data
+     * 4. Shows a confirmation message to the user
+     * 
+     * Quy trình:
+     * 1. Mở hộp thoại chọn tệp được cấu hình cho các tệp CSV
+     * 2. Nếu người dùng chọn một tệp, cố gắng tải dữ liệu chứng khoán
+     * 3. Cập nhật biểu đồ giá với dữ liệu đã tải
+     * 4. Hiển thị thông báo xác nhận cho người dùng
+     */
     private void loadDataFile() {
         JFileChooser fileChooser = new JFileChooser("data"); // Set default directory to 'data'
         fileChooser.setDialogTitle("Open Stock Data File");
@@ -388,9 +404,11 @@ public class StockPredictGUI extends JFrame {
             File selectedFile = fileChooser.getSelectedFile();
             try {
                 // Read stock data from file
+                // Đọc dữ liệu chứng khoán từ tệp
                 loadStockDataFromFile(selectedFile);
                 
                 // Update the UI with the loaded data
+                // Cập nhật giao diện người dùng với dữ liệu đã tải
                 updatePriceChart();
                 JOptionPane.showMessageDialog(this, 
                                              "Successfully loaded " + stockDataList.size() + " data points.",
@@ -405,6 +423,19 @@ public class StockPredictGUI extends JFrame {
         }
     }
     
+    /**
+     * Loads stock data from a CSV file into the application's data model
+     * Tải dữ liệu chứng khoán từ tệp CSV vào mô hình dữ liệu của ứng dụng
+     * 
+     * CSV format expected:
+     * Date,Open,High,Low,Close,Volume
+     * 
+     * Định dạng CSV dự kiến:
+     * Ngày,Mở,Cao,Thấp,Đóng,Khối lượng
+     * 
+     * @param file CSV file containing stock data (Tệp CSV chứa dữ liệu chứng khoán)
+     * @throws IOException If there's an error reading the file (Nếu có lỗi khi đọc tệp)
+     */
     private void loadStockDataFromFile(File file) throws IOException {
         stockDataList.clear();
         
@@ -446,21 +477,40 @@ public class StockPredictGUI extends JFrame {
         System.out.println("Loaded " + stockDataList.size() + " data points from " + file.getName());
         
         // Check the first few entries for date format debugging
+        // Kiểm tra một vài mục đầu tiên để gỡ lỗi định dạng ngày
         int debugCount = Math.min(stockDataList.size(), 5);
         for (int i = 0; i < debugCount; i++) {
             System.out.println("Sample date [" + i + "]: " + stockDataList.get(i).date);
         }
     }
     
+    /**
+     * Updates the price chart with the current stock data
+     * Cập nhật biểu đồ giá với dữ liệu chứng khoán hiện tại
+     * 
+     * Process:
+     * 1. Creates a time series from the stock data
+     * 2. Generates a JFreeChart time series chart
+     * 3. Configures the chart panel with zoom capabilities
+     * 4. Updates the UI to display the new chart
+     * 
+     * Quy trình:
+     * 1. Tạo chuỗi thời gian từ dữ liệu chứng khoán
+     * 2. Tạo biểu đồ chuỗi thời gian JFreeChart
+     * 3. Cấu hình bảng điều khiển biểu đồ với khả năng phóng to
+     * 4. Cập nhật giao diện người dùng để hiển thị biểu đồ mới
+     */
     private void updatePriceChart() {
         if (stockDataList.isEmpty()) {
             return;
         }
         
         // Create a time series for the stock data
+        // Tạo chuỗi thời gian cho dữ liệu chứng khoán
         TimeSeries series = new TimeSeries("Price");
         
         // Parse dates and add to series
+        // Phân tích ngày tháng và thêm vào chuỗi
         for (StockData data : stockDataList) {
             try {
                 Day date = parseDateString(data.date);
@@ -473,6 +523,7 @@ public class StockPredictGUI extends JFrame {
         }
         
         // Create dataset and chart
+        // Tạo bộ dữ liệu và biểu đồ
         TimeSeriesCollection dataset = new TimeSeriesCollection(series);
         JFreeChart chart = ChartFactory.createTimeSeriesChart(
             "Stock Price", // title
@@ -485,12 +536,14 @@ public class StockPredictGUI extends JFrame {
         );
         
         // Create chart panel
+        // Tạo bảng điều khiển biểu đồ
         ChartPanel chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(new Dimension(800, 500));
         chartPanel.setDomainZoomable(true);
         chartPanel.setRangeZoomable(true);
         
         // Replace the placeholder in the chart panel
+        // Thay thế giữ chỗ trong bảng điều khiển biểu đồ
         this.chartPanel.removeAll();
         this.chartPanel.add(chartPanel, BorderLayout.CENTER);
         this.chartPanel.revalidate();
@@ -588,6 +641,22 @@ public class StockPredictGUI extends JFrame {
         updateAnomaliesList();
     }
     
+    /**
+     * Runs data mining analysis on the loaded stock data
+     * Chạy phân tích khai thác dữ liệu trên dữ liệu chứng khoán đã tải
+     * 
+     * Process:
+     * 1. Validates that stock data has been loaded
+     * 2. Converts internal data model to the format needed by the DataMining class
+     * 3. Detects price patterns, trading signals, and anomalies
+     * 4. Updates the UI to display the analysis results
+     * 
+     * Quy trình:
+     * 1. Xác nhận rằng dữ liệu chứng khoán đã được tải
+     * 2. Chuyển đổi mô hình dữ liệu nội bộ sang định dạng cần thiết cho lớp DataMining
+     * 3. Phát hiện các mẫu hình giá, tín hiệu giao dịch và bất thường
+     * 4. Cập nhật giao diện người dùng để hiển thị kết quả phân tích
+     */
     private void runAnalysis() {
         if (stockDataList.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
@@ -599,18 +668,23 @@ public class StockPredictGUI extends JFrame {
         
         // Convert internal StockData to DataUtils.StockData using reflection
         // This avoids compatibility issues between different StockData classes
+        // Chuyển đổi StockData nội bộ sang DataUtils.StockData sử dụng phản chiếu
+        // Điều này tránh các vấn đề tương thích giữa các lớp StockData khác nhau
         Object[] stockDataArray = stockDataList.toArray();
         DataUtils.StockData[] dataArray = DataUtils.StockData.fromGUIStockDataArray(stockDataArray);
         
         // Use Java-based data mining implementation
+        // Sử dụng triển khai khai thác dữ liệu dựa trên Java
         try {
             // Detect price patterns
+            // Phát hiện mẫu hình giá
             DataUtils.PatternResult[] detectedPatterns = DataMining.detectPricePatterns(dataArray);
             patternsList.clear();
             for (DataUtils.PatternResult pattern : detectedPatterns) {
                 PatternResult guiPattern = new PatternResult();
                 
                 // Map pattern type to string
+                // Ánh xạ loại mẫu hình thành chuỗi
                 switch(pattern.type) {
                     case DataMining.PATTERN_SUPPORT:
                         guiPattern.type = "Support";
@@ -647,6 +721,7 @@ public class StockPredictGUI extends JFrame {
             }
             
             // Detect SMA crossover signals (10-day and 30-day)
+            // Phát hiện tín hiệu cắt nhau SMA (10 ngày và 30 ngày)
             DataUtils.TradingSignal[] detectedSignals = DataMining.detectSMACrossoverSignals(dataArray, 10, 30);
             signalsList.clear();
             for (DataUtils.TradingSignal dmSignal : detectedSignals) {
@@ -663,6 +738,7 @@ public class StockPredictGUI extends JFrame {
             }
             
             // Detect anomalies
+            // Phát hiện bất thường
             DataUtils.AnomalyResult[] detectedAnomalies = DataMining.detectAnomalies(dataArray);
             anomaliesList.clear();
             for (DataUtils.AnomalyResult dmAnomaly : detectedAnomalies) {
@@ -676,6 +752,7 @@ public class StockPredictGUI extends JFrame {
             }
             
             // Refresh the UI with the analysis results
+            // Làm mới giao diện người dùng với kết quả phân tích
             refreshData();
             
             JOptionPane.showMessageDialog(this, 
@@ -862,6 +939,22 @@ public class StockPredictGUI extends JFrame {
         }
     }
     
+    /**
+     * Refreshes indicator charts based on selected indicators and parameters
+     * Làm mới các biểu đồ chỉ báo dựa trên các chỉ báo và tham số đã chọn
+     * 
+     * Features:
+     * 1. Creates time series for price and selected indicators
+     * 2. Calculates indicators based on user-selected parameters
+     * 3. Creates separate scales for indicators requiring different scales
+     * 4. Generates JFreeChart with multiple datasets and renderers
+     * 
+     * Tính năng:
+     * 1. Tạo chuỗi thời gian cho giá và các chỉ báo đã chọn
+     * 2. Tính toán các chỉ báo dựa trên tham số do người dùng chọn
+     * 3. Tạo các thang đo riêng cho các chỉ báo yêu cầu thang đo khác nhau
+     * 4. Tạo JFreeChart với nhiều bộ dữ liệu và trình hiển thị
+     */
     private void refreshIndicators() {
         if (stockDataList.isEmpty()) {
             JOptionPane.showMessageDialog(this, "No stock data loaded. Please load data first.", 
@@ -871,16 +964,20 @@ public class StockPredictGUI extends JFrame {
         
         try {
             // Create a time series for the stock price
+            // Tạo chuỗi thời gian cho giá cổ phiếu
             TimeSeries priceSeries = new TimeSeries("Price");
             
             // Create datasets for selected indicators
+            // Tạo bộ dữ liệu cho các chỉ báo đã chọn
             TimeSeriesCollection priceDataset = new TimeSeriesCollection();
             priceDataset.addSeries(priceSeries);
             
             // Additional dataset for indicators that need their own scale (RSI, MACD)
+            // Bộ dữ liệu bổ sung cho các chỉ báo cần thang đo riêng (RSI, MACD)
             TimeSeriesCollection secondaryDataset = null;
             
             // Add price data
+            // Thêm dữ liệu giá
             for (StockData data : stockDataList) {
                 try {
                     Day date = parseDateString(data.date);
@@ -1211,11 +1308,13 @@ public class StockPredictGUI extends JFrame {
             }
             
             // Create the chart
+            // Tạo biểu đồ
             JFreeChart chart;
             
             if (secondaryDataset != null && 
                 (rsiCheckbox.isSelected() || macdCheckbox.isSelected())) {
                 // Create a chart with two vertical axes for price and indicators
+                // Tạo biểu đồ với hai trục dọc cho giá và chỉ báo
                 chart = ChartFactory.createTimeSeriesChart(
                     "Technical Indicators", // title
                     "Date",                 // x-axis label
@@ -1227,6 +1326,7 @@ public class StockPredictGUI extends JFrame {
                 );
                 
                 // Get the plot and add a second axis for RSI/MACD
+                // Lấy đồ thị và thêm trục thứ hai cho RSI/MACD
                 org.jfree.chart.plot.XYPlot plot = chart.getXYPlot();
                 org.jfree.chart.axis.NumberAxis axis2 = new org.jfree.chart.axis.NumberAxis("Indicator Value");
                 axis2.setAutoRangeIncludesZero(false);
@@ -1235,11 +1335,13 @@ public class StockPredictGUI extends JFrame {
                 plot.mapDatasetToRangeAxis(1, 1);
                 
                 // Add renderer for second dataset
+                // Thêm trình hiển thị cho bộ dữ liệu thứ hai
                 org.jfree.chart.renderer.xy.XYLineAndShapeRenderer renderer2 = 
                     new org.jfree.chart.renderer.xy.XYLineAndShapeRenderer();
                 plot.setRenderer(1, renderer2);
             } else {
                 // Create a simple chart with just price and price-related indicators
+                // Tạo biểu đồ đơn giản chỉ với giá và các chỉ báo liên quan đến giá
                 chart = ChartFactory.createTimeSeriesChart(
                     "Technical Indicators", // title
                     "Date",                 // x-axis label
@@ -1252,12 +1354,14 @@ public class StockPredictGUI extends JFrame {
             }
             
             // Create chart panel
+            // Tạo bảng điều khiển biểu đồ
             ChartPanel chartPanel = new ChartPanel(chart);
             chartPanel.setPreferredSize(new Dimension(800, 500));
             chartPanel.setDomainZoomable(true);
             chartPanel.setRangeZoomable(true);
             
             // Replace the placeholder in the indicator chart panel
+            // Thay thế giữ chỗ trong bảng điều khiển biểu đồ chỉ báo
             indicatorChartPanel.removeAll();
             indicatorChartPanel.add(chartPanel, BorderLayout.CENTER);
             indicatorChartPanel.revalidate();
@@ -1355,30 +1459,41 @@ public class StockPredictGUI extends JFrame {
     
     // Data classes
     
+    /**
+     * Stock data representation with OHLCV (Open, High, Low, Close, Volume) values
+     * Biểu diễn dữ liệu chứng khoán với các giá trị OHLCV (Mở, Cao, Thấp, Đóng, Khối lượng)
+     */
     class StockData {
-        String date;
-        double open;
-        double high;
-        double low;
-        double close;
-        double volume;
+        String date;   // Date in string format (Ngày dưới dạng chuỗi)
+        double open;   // Opening price (Giá mở cửa)
+        double high;   // Highest price (Giá cao nhất)
+        double low;    // Lowest price (Giá thấp nhất)
+        double close;  // Closing price (Giá đóng cửa)
+        double volume; // Trading volume (Khối lượng giao dịch)
     }
     
+    /**
+     * Represents a detected price pattern in the stock data
+     * Biểu diễn một mẫu hình giá được phát hiện trong dữ liệu chứng khoán
+     */
     class PatternResult {
-        String type;       // Pattern type name
-        int startIndex;    // Start index in the data array
-        int endIndex;      // End index in the data array
-        double confidence; // Confidence level (0.0-1.0)
-        double expectedMove; // Expected price move (% change)
-        String description; // Human-readable description
+        String type;       // Pattern type name (Tên loại mẫu hình)
+        int startIndex;    // Start index in the data array (Chỉ số bắt đầu trong mảng dữ liệu)
+        int endIndex;      // End index in the data array (Chỉ số kết thúc trong mảng dữ liệu)
+        double confidence; // Confidence level (0.0-1.0) (Mức độ tin cậy (0.0-1.0))
+        double expectedMove; // Expected price move (% change) (Biến động giá dự kiến (% thay đổi))
+        String description; // Human-readable description (Mô tả dễ đọc cho con người)
         
         // Constructor for creating from DataMining results
+        // Hàm tạo để tạo từ kết quả DataMining
         public PatternResult() {
         }
         
         // Constructor for creating from DataUtils PatternResult
+        // Hàm tạo để tạo từ DataUtils PatternResult
         public PatternResult(DataUtils.PatternResult source) {
             // Map int type to string type
+            // Ánh xạ kiểu int thành kiểu chuỗi
             switch(source.type) {
                 case DataMining.PATTERN_SUPPORT:
                     this.type = "Support";
@@ -1413,28 +1528,55 @@ public class StockPredictGUI extends JFrame {
         }
     }
     
+    /**
+     * Represents a detected trading signal (buy/sell/hold recommendation)
+     * Biểu diễn một tín hiệu giao dịch được phát hiện (khuyến nghị mua/bán/giữ)
+     */
     class TradingSignal {
-        String type;        // Signal type (BUY, SELL, etc.)
-        int signalIndex;    // Index in data where signal occurs
-        double confidence;  // Confidence level (0.0-1.0)
-        double entryPrice;  // Suggested entry price
-        double targetPrice; // Target price for take profit
-        double stopLossPrice; // Suggested stop loss price
-        double riskRewardRatio; // Risk/reward ratio
-        String description; // Signal description
+        String type;        // Signal type (BUY, SELL, etc.) (Loại tín hiệu (MUA, BÁN, v.v.))
+        int signalIndex;    // Index in data where signal occurs (Chỉ số trong dữ liệu nơi tín hiệu xuất hiện)
+        double confidence;  // Confidence level (0.0-1.0) (Mức độ tin cậy (0.0-1.0))
+        double entryPrice;  // Suggested entry price (Giá vào được đề xuất)
+        double targetPrice; // Target price for take profit (Giá mục tiêu để chốt lời)
+        double stopLossPrice; // Suggested stop loss price (Giá dừng lỗ được đề xuất)
+        double riskRewardRatio; // Risk/reward ratio (Tỷ lệ rủi ro/phần thưởng)
+        String description; // Signal description (Mô tả tín hiệu)
     }
     
+    /**
+     * Represents a detected anomaly in the stock data
+     * Biểu diễn một bất thường được phát hiện trong dữ liệu chứng khoán
+     */
     class AnomalyResult {
-        int index;             // Index in data where anomaly occurs
-        double score;          // Anomaly score (higher is more anomalous)
-        double priceDeviation; // Price deviation in standard deviations
-        double volumeDeviation; // Volume deviation in standard deviations
-        String description;    // Human-readable description
+        int index;             // Index in data where anomaly occurs (Chỉ số trong dữ liệu nơi bất thường xuất hiện)
+        double score;          // Anomaly score (higher is more anomalous) (Điểm bất thường (cao hơn là bất thường hơn))
+        double priceDeviation; // Price deviation in standard deviations (Độ lệch giá tính bằng độ lệch chuẩn)
+        double volumeDeviation; // Volume deviation in standard deviations (Độ lệch khối lượng tính bằng độ lệch chuẩn)
+        String description;    // Human-readable description (Mô tả dễ đọc cho con người)
     }
     
     // Main method
+    /**
+     * Application entry point that initializes and shows the GUI
+     * Điểm vào của ứng dụng để khởi tạo và hiển thị giao diện đồ họa
+     * 
+     * Process:
+     * 1. Sets the system look and feel for native appearance
+     * 2. Creates and displays the main GUI window
+     * 3. Attempts to auto-load SPY data if available
+     * 4. Runs initial analysis if data is successfully loaded
+     * 
+     * Quy trình:
+     * 1. Đặt giao diện hệ thống cho diện mạo tự nhiên
+     * 2. Tạo và hiển thị cửa sổ GUI chính
+     * 3. Cố gắng tự động tải dữ liệu SPY nếu có sẵn
+     * 4. Chạy phân tích ban đầu nếu dữ liệu được tải thành công
+     * 
+     * @param args Command line arguments (not used) (Các đối số dòng lệnh (không được sử dụng))
+     */
     public static void main(String[] args) {
         // Set look and feel
+        // Đặt giao diện và cảm nhận
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception e) {
@@ -1442,25 +1584,31 @@ public class StockPredictGUI extends JFrame {
         }
         
         // Create and show GUI
+        // Tạo và hiển thị GUI
         SwingUtilities.invokeLater(() -> {
             StockPredictGUI gui = new StockPredictGUI();
             gui.setVisible(true);
             
             // Auto-load SPY data
+            // Tự động tải dữ liệu SPY
             try {
                 // Look for SPY data file in the data directory
+                // Tìm kiếm tệp dữ liệu SPY trong thư mục data
                 File dataDir = new File("data");
                 if (dataDir.exists() && dataDir.isDirectory()) {
                     File[] files = dataDir.listFiles((dir, name) -> name.toLowerCase().startsWith("spy") && name.toLowerCase().endsWith(".csv"));
                     if (files != null && files.length > 0) {
                         // Sort files to get the most recent one
+                        // Sắp xếp các tệp để lấy tệp mới nhất
                         Arrays.sort(files, (f1, f2) -> f2.getName().compareTo(f1.getName()));
                         
                         // Load the most recent SPY data file
+                        // Tải tệp dữ liệu SPY mới nhất
                         gui.loadStockDataFromFile(files[0]);
                         gui.updatePriceChart();
                         
                         // Run analysis
+                        // Chạy phân tích
                         SwingUtilities.invokeLater(() -> {
                             gui.runAnalysis();
                         });
