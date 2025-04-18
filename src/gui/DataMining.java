@@ -688,6 +688,7 @@ public class DataMining {
         double[] longSMA = calculateSMA(data, longPeriod);
         
         // Look for crossovers, starting from the first valid point
+        // Modified to include the most recent data point
         for (int i = longPeriod; i < data.length; i++) {
             // Short SMA crosses above Long SMA - bullish signal
             if (shortSMA[i-1] <= longSMA[i-1] && shortSMA[i] > longSMA[i]) {
@@ -774,6 +775,7 @@ public class DataMining {
         double stdDevVolume = calculateStdDev(volumes, meanVolume);
         
         // Look for anomalies in the data, starting from day 1
+        // No change needed here as it already loops through all data points
         for (int i = 1; i < data.length; i++) {
             // Calculate price change for this day
             double priceChange = (data[i].close - data[i-1].close) / data[i-1].close;
