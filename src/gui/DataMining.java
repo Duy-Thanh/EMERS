@@ -36,8 +36,8 @@ public class DataMining {
     /**
      * Detect patterns in the provided data
      */
-    public static List<DataUtils.PatternResult> detectPricePatterns(DataUtils.StockData[] data) {
-        if (data == null || data.length < 50) return new ArrayList<>();
+    public static DataUtils.PatternResult[] detectPricePatterns(DataUtils.StockData[] data) {
+        if (data == null || data.length < 50) return new DataUtils.PatternResult[0];
         
         // Initialize with larger capacity for more aggressive detection
         List<DataUtils.PatternResult> patterns = new ArrayList<>(data.length / 10);
@@ -52,7 +52,9 @@ public class DataMining {
         // Sort patterns by index
         Collections.sort(patterns, (p1, p2) -> Integer.compare(p1.startIndex, p2.startIndex));
         
-        return patterns;
+        // Convert list to array
+        DataUtils.PatternResult[] result = new DataUtils.PatternResult[patterns.size()];
+        return patterns.toArray(result);
     }
     
     /**
