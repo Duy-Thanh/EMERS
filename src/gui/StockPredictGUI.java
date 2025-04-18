@@ -2,6 +2,8 @@ package gui;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableModel;
+import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.BufferedReader;
@@ -19,6 +21,9 @@ import org.jfree.data.time.Day;
 import org.jfree.data.time.TimeSeries;
 import org.jfree.data.time.TimeSeriesCollection;
 import org.jfree.data.xy.XYDataset;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.time.LocalDate;
 
 /**
  * StockPredictGUI - Java-based GUI application for displaying StockPredict data mining results
@@ -184,8 +189,10 @@ public class StockPredictGUI extends JFrame {
         model.addColumn("Expected Move");
         model.addColumn("Description");
         
-        // Create table
+        // Create table with sorting capability
         patternsTable = new JTable(model);
+        patternsTable.setAutoCreateRowSorter(true); // Enable sorting
+        patternsTable.setFillsViewportHeight(true);
         JScrollPane scrollPane = new JScrollPane(patternsTable);
         panel.add(scrollPane, BorderLayout.CENTER);
         
@@ -220,8 +227,10 @@ public class StockPredictGUI extends JFrame {
         model.addColumn("R/R Ratio");
         model.addColumn("Description");
         
-        // Create table
+        // Create table with sorting capability
         signalsTable = new JTable(model);
+        signalsTable.setAutoCreateRowSorter(true); // Enable sorting
+        signalsTable.setFillsViewportHeight(true);
         JScrollPane scrollPane = new JScrollPane(signalsTable);
         panel.add(scrollPane, BorderLayout.CENTER);
         
@@ -253,8 +262,10 @@ public class StockPredictGUI extends JFrame {
         model.addColumn("Volume Deviation");
         model.addColumn("Description");
         
-        // Create table
+        // Create table with sorting capability
         anomaliesTable = new JTable(model);
+        anomaliesTable.setAutoCreateRowSorter(true); // Enable sorting
+        anomaliesTable.setFillsViewportHeight(true);
         JScrollPane scrollPane = new JScrollPane(anomaliesTable);
         panel.add(scrollPane, BorderLayout.CENTER);
         
@@ -573,15 +584,17 @@ public class StockPredictGUI extends JFrame {
             return;
         }
         
-        // Convert stockDataList to array for data mining
-        StockData[] dataArray = stockDataList.toArray(new StockData[0]);
+        // Convert internal StockData to DataUtils.StockData using reflection
+        // This avoids compatibility issues between different StockData classes
+        Object[] stockDataArray = stockDataList.toArray();
+        DataUtils.StockData[] dataArray = DataUtils.StockData.fromGUIStockDataArray(stockDataArray);
         
         // Use Java-based data mining implementation
         try {
             // Detect price patterns
-            gui.DataMining.PatternResult[] detectedPatterns = DataMining.detectPricePatterns(dataArray);
+            DataUtils.PatternResult[] detectedPatterns = DataMining.detectPricePatterns(dataArray);
             patternsList.clear();
-            for (gui.DataMining.PatternResult pattern : detectedPatterns) {
+            for (DataUtils.PatternResult pattern : detectedPatterns) {
                 PatternResult guiPattern = new PatternResult();
                 
                 // Map pattern type to string
@@ -621,16 +634,31 @@ public class StockPredictGUI extends JFrame {
             }
             
             // Detect SMA crossover signals (10-day and 30-day)
-            TradingSignal[] detectedSignals = DataMining.detectSMACrossoverSignals(dataArray, 10, 30);
+            DataUtils.TradingSignal[] detectedSignals = DataMining.detectSMACrossoverSignals(dataArray, 10, 30);
             signalsList.clear();
-            for (TradingSignal signal : detectedSignals) {
+            for (DataUtils.TradingSignal dmSignal : detectedSignals) {
+                TradingSignal signal = new TradingSignal();
+                signal.type = dmSignal.type;
+                signal.signalIndex = dmSignal.signalIndex;
+                signal.confidence = dmSignal.confidence;
+                signal.entryPrice = dmSignal.entryPrice;
+                signal.targetPrice = dmSignal.targetPrice;
+                signal.stopLossPrice = dmSignal.stopLossPrice;
+                signal.riskRewardRatio = dmSignal.riskRewardRatio;
+                signal.description = dmSignal.description;
                 signalsList.add(signal);
             }
             
             // Detect anomalies
-            AnomalyResult[] detectedAnomalies = DataMining.detectAnomalies(dataArray);
+            DataUtils.AnomalyResult[] detectedAnomalies = DataMining.detectAnomalies(dataArray);
             anomaliesList.clear();
-            for (AnomalyResult anomaly : detectedAnomalies) {
+            for (DataUtils.AnomalyResult dmAnomaly : detectedAnomalies) {
+                AnomalyResult anomaly = new AnomalyResult();
+                anomaly.index = dmAnomaly.index;
+                anomaly.score = dmAnomaly.score;
+                anomaly.priceDeviation = dmAnomaly.priceDeviation;
+                anomaly.volumeDeviation = dmAnomaly.volumeDeviation;
+                anomaly.description = dmAnomaly.description;
                 anomaliesList.add(anomaly);
             }
             
@@ -651,63 +679,15 @@ public class StockPredictGUI extends JFrame {
                                          "Analysis Error", 
                                          JOptionPane.ERROR_MESSAGE);
             e.printStackTrace();
-            
-            // Fallback to sample data if an error occurs
-            generateSampleResults();
-            refreshData();
-        }
-    }
-    
-    private void generateSampleResults() {
-        // This method is no longer needed as we're using actual data mining
-        // It's kept as a fallback in case the actual implementation fails
-        
-        // Generate sample patterns
-        patternsList.clear();
-        for (int i = 0; i < 5; i++) {
-            PatternResult pattern = new PatternResult();
-            pattern.type = i % 2 == 0 ? "Head & Shoulders" : "Double Bottom";
-            pattern.startIndex = i * 10;
-            pattern.endIndex = i * 10 + 20;
-            pattern.confidence = 0.7 + (i * 0.05);
-            pattern.expectedMove = 2.5 + (i * 0.5);
-            pattern.description = "Sample pattern " + (i+1);
-            patternsList.add(pattern);
-        }
-        
-        // Generate sample signals
-        signalsList.clear();
-        for (int i = 0; i < 5; i++) {
-            TradingSignal signal = new TradingSignal();
-            signal.type = i % 2 == 0 ? "BUY" : "SELL";
-            signal.signalIndex = i * 15;
-            signal.confidence = 0.8 + (i * 0.03);
-            signal.entryPrice = 150.0 + (i * 5);
-            signal.targetPrice = signal.type.equals("BUY") ? 
-                signal.entryPrice * 1.1 : signal.entryPrice * 0.9;
-            signal.stopLossPrice = signal.type.equals("BUY") ? 
-                signal.entryPrice * 0.95 : signal.entryPrice * 1.05;
-            signal.riskRewardRatio = 2.0;
-            signal.description = "Sample " + signal.type + " signal " + (i+1);
-            signalsList.add(signal);
-        }
-        
-        // Generate sample anomalies
-        anomaliesList.clear();
-        for (int i = 0; i < 5; i++) {
-            AnomalyResult anomaly = new AnomalyResult();
-            anomaly.index = i * 12;
-            anomaly.score = 3.0 + (i * 0.5);
-            anomaly.priceDeviation = 2.5 + (i * 0.3);
-            anomaly.volumeDeviation = 3.0 + (i * 0.4);
-            anomaly.description = "Sample anomaly " + (i+1);
-            anomaliesList.add(anomaly);
         }
     }
     
     private void updatePatternsList() {
         DefaultTableModel model = (DefaultTableModel) patternsTable.getModel();
         model.setRowCount(0); // Clear existing rows
+        
+        // Log the total number of patterns for debugging
+        System.out.println("Total patterns detected: " + patternsList.size());
         
         for (int i = 0; i < patternsList.size(); i++) {
             PatternResult pattern = patternsList.get(i);
@@ -733,11 +713,36 @@ public class StockPredictGUI extends JFrame {
                 pattern.description
             });
         }
+        
+        // Set up a custom sorter for date columns
+        patternsTable.setAutoCreateRowSorter(true);
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(patternsTable.getModel());
+        patternsTable.setRowSorter(sorter);
+        
+        // Add date comparators for the Start Date and End Date columns
+        sorter.setComparator(2, Comparator.comparing(s -> {
+            try {
+                return s.toString().isEmpty() ? LocalDate.MIN : LocalDate.parse(s.toString().split("T")[0]);
+            } catch (Exception e) {
+                return LocalDate.MIN;
+            }
+        }));
+        
+        sorter.setComparator(3, Comparator.comparing(s -> {
+            try {
+                return s.toString().isEmpty() ? LocalDate.MIN : LocalDate.parse(s.toString().split("T")[0]);
+            } catch (Exception e) {
+                return LocalDate.MIN;
+            }
+        }));
     }
     
     private void updateSignalsList() {
         DefaultTableModel model = (DefaultTableModel) signalsTable.getModel();
         model.setRowCount(0); // Clear existing rows
+        
+        // Log the total number of signals for debugging
+        System.out.println("Total trading signals detected: " + signalsList.size());
         
         for (int i = 0; i < signalsList.size(); i++) {
             TradingSignal signal = signalsList.get(i);
@@ -759,11 +764,28 @@ public class StockPredictGUI extends JFrame {
                 signal.description
             });
         }
+        
+        // Set up a custom sorter for date column
+        signalsTable.setAutoCreateRowSorter(true);
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(signalsTable.getModel());
+        signalsTable.setRowSorter(sorter);
+        
+        // Add date comparator for the Date column
+        sorter.setComparator(2, Comparator.comparing(s -> {
+            try {
+                return s.toString().isEmpty() ? LocalDate.MIN : LocalDate.parse(s.toString().split("T")[0]);
+            } catch (Exception e) {
+                return LocalDate.MIN;
+            }
+        }));
     }
     
     private void updateAnomaliesList() {
         DefaultTableModel model = (DefaultTableModel) anomaliesTable.getModel();
         model.setRowCount(0); // Clear existing rows
+        
+        // Log the total number of anomalies for debugging
+        System.out.println("Total anomalies detected: " + anomaliesList.size());
         
         for (int i = 0; i < anomaliesList.size(); i++) {
             AnomalyResult anomaly = anomaliesList.get(i);
@@ -782,6 +804,20 @@ public class StockPredictGUI extends JFrame {
                 anomaly.description
             });
         }
+        
+        // Set up a custom sorter for date column
+        anomaliesTable.setAutoCreateRowSorter(true);
+        TableRowSorter<TableModel> sorter = new TableRowSorter<>(anomaliesTable.getModel());
+        anomaliesTable.setRowSorter(sorter);
+        
+        // Add date comparator for the Date column
+        sorter.setComparator(1, Comparator.comparing(s -> {
+            try {
+                return s.toString().isEmpty() ? LocalDate.MIN : LocalDate.parse(s.toString().split("T")[0]);
+            } catch (Exception e) {
+                return LocalDate.MIN;
+            }
+        }));
     }
     
     /**
@@ -820,7 +856,9 @@ public class StockPredictGUI extends JFrame {
     private void viewSelectedPattern() {
         int selectedRow = patternsTable.getSelectedRow();
         if (selectedRow >= 0) {
-            PatternResult pattern = patternsList.get(selectedRow);
+            // Convert view row index to model row index (necessary when table is sorted)
+            int modelRow = patternsTable.convertRowIndexToModel(selectedRow);
+            PatternResult pattern = patternsList.get(modelRow);
             showDetailDialog("Pattern Details", pattern.description);
         } else {
             JOptionPane.showMessageDialog(this, "Please select a pattern to view.");
@@ -830,7 +868,9 @@ public class StockPredictGUI extends JFrame {
     private void viewSelectedSignal() {
         int selectedRow = signalsTable.getSelectedRow();
         if (selectedRow >= 0) {
-            TradingSignal signal = signalsList.get(selectedRow);
+            // Convert view row index to model row index (necessary when table is sorted)
+            int modelRow = signalsTable.convertRowIndexToModel(selectedRow);
+            TradingSignal signal = signalsList.get(modelRow);
             showDetailDialog("Signal Details", signal.description);
         } else {
             JOptionPane.showMessageDialog(this, "Please select a signal to view.");
@@ -840,7 +880,9 @@ public class StockPredictGUI extends JFrame {
     private void viewSelectedAnomaly() {
         int selectedRow = anomaliesTable.getSelectedRow();
         if (selectedRow >= 0) {
-            AnomalyResult anomaly = anomaliesList.get(selectedRow);
+            // Convert view row index to model row index (necessary when table is sorted)
+            int modelRow = anomaliesTable.convertRowIndexToModel(selectedRow);
+            AnomalyResult anomaly = anomaliesList.get(modelRow);
             showDetailDialog("Anomaly Details", anomaly.description);
         } else {
             JOptionPane.showMessageDialog(this, "Please select an anomaly to view.");
@@ -917,8 +959,8 @@ public class StockPredictGUI extends JFrame {
         public PatternResult() {
         }
         
-        // Constructor for creating from DataMining results
-        public PatternResult(gui.DataMining.PatternResult source) {
+        // Constructor for creating from DataUtils PatternResult
+        public PatternResult(DataUtils.PatternResult source) {
             // Map int type to string type
             switch(source.type) {
                 case DataMining.PATTERN_SUPPORT:
@@ -986,6 +1028,33 @@ public class StockPredictGUI extends JFrame {
         SwingUtilities.invokeLater(() -> {
             StockPredictGUI gui = new StockPredictGUI();
             gui.setVisible(true);
+            
+            // Auto-load SPY data
+            try {
+                // Look for SPY data file in the data directory
+                File dataDir = new File("data");
+                if (dataDir.exists() && dataDir.isDirectory()) {
+                    File[] files = dataDir.listFiles((dir, name) -> name.toLowerCase().startsWith("spy") && name.toLowerCase().endsWith(".csv"));
+                    if (files != null && files.length > 0) {
+                        // Sort files to get the most recent one
+                        Arrays.sort(files, (f1, f2) -> f2.getName().compareTo(f1.getName()));
+                        
+                        // Load the most recent SPY data file
+                        gui.loadStockDataFromFile(files[0]);
+                        gui.updatePriceChart();
+                        
+                        // Run analysis
+                        SwingUtilities.invokeLater(() -> {
+                            gui.runAnalysis();
+                        });
+                        
+                        System.out.println("Automatically loaded SPY data from: " + files[0].getName());
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error auto-loading SPY data: " + e.getMessage());
+                e.printStackTrace();
+            }
         });
     }
 } 

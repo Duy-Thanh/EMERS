@@ -24,6 +24,7 @@ REM Ensure necessary directories exist
 if not exist bin mkdir bin
 if not exist lib mkdir lib
 if not exist obj mkdir obj
+if not exist bin\gui mkdir bin\gui
 
 REM Set Java classpath
 set CLASSPATH=.;lib\*;bin
@@ -48,10 +49,16 @@ echo Note: JNI bridge will be compiled in a separate step for performance reason
 REM Compile Java GUI
 echo Compiling Java GUI...
 
-REM First compile DataMining.java
-javac -d bin src\gui\DataMining.java
+REM First compile DataUtils.java
+echo 1. Compiling DataUtils.java...
+javac -d bin src\gui\DataUtils.java
 
-REM Then compile StockPredictGUI.java that depends on it
+REM Then compile DataMining.java
+echo 2. Compiling DataMining.java...
+javac -d bin -cp %CLASSPATH% src\gui\DataMining.java
+
+REM Finally compile StockPredictGUI.java
+echo 3. Compiling StockPredictGUI.java...
 javac -d bin -cp %CLASSPATH% src\gui\StockPredictGUI.java
 
 if %ERRORLEVEL% NEQ 0 (
@@ -60,6 +67,8 @@ if %ERRORLEVEL% NEQ 0 (
     pause
     exit /b 1
 )
+
+echo All compilation steps completed successfully.
 
 REM Create a sample data file for demo if user doesn't already have data
 if not exist data mkdir data
@@ -77,6 +86,15 @@ if not exist data\MSFT.csv (
     echo 2023-01-09,237.10,238.30,235.70,236.80,13654321 >> data\MSFT.csv
     echo 2023-01-10,236.80,237.90,235.20,237.50,12543210 >> data\MSFT.csv
 )
+
+REM Note about the updated analysis system
+echo.
+echo NOTE: The analysis system has been completely redesigned to dynamically
+echo handle datasets of any size. The pattern, signal, and anomaly detection 
+echo now uses dynamic allocation based on the dataset characteristics.
+echo There are NO artificial limits on the number of patterns or timeframe
+echo that can be analyzed and displayed.
+echo.
 
 REM Run the GUI
 echo Starting StockPredict GUI...
