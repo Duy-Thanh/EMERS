@@ -688,10 +688,10 @@ int parseNewsDataJSON(const char* jsonData, EventDatabase* events) {
                 // Calculate impact score
                 event.impactScore = (int)calculateImpactScore(&event);
                 
-                // Add to database
-                if (addEventToDatabase(events, &event)) {
-                    count++;
-                }
+                // // Add to database
+                // if (addEventToDatabase(events, &event)) {
+                //     count++;
+                // }
             }
         }
     } else {
@@ -743,10 +743,10 @@ int parseNewsDataJSON(const char* jsonData, EventDatabase* events) {
                     // Calculate impact score
                     event.impactScore = (int)calculateImpactScore(&event);
                     
-                    // Add to database
-                    if (addEventToDatabase(events, &event)) {
-                        count++;
-                    }
+                    // // Add to database
+                    // if (addEventToDatabase(events, &event)) {
+                    //     count++;
+                    // }
                 }
             }
         } else {

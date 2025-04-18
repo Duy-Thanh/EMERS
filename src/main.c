@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
         printf("Retrieved %d data points for %s.\n", stocks[i].dataSize, symbols[i]);
         
         /* Analyze the stock */
-        analyzeStock(&stocks[i]);
+        //analyzeStock(&stocks[i]);
     }
     
     /* Clean up */
@@ -142,33 +142,33 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-void analyzeStock(const Stock* stock) {
-    if (!stock) {
-        return;
-    }
+// void analyzeStock(const Stock* stock) {
+//     if (!stock) {
+//         return;
+//     }
     
-    printf("\nAnalyzing stock: %s\n", stock->symbol);
-    printf("Retrieved %d data points for %s.\n", stock->dataSize, stock->symbol);
+//     printf("\nAnalyzing stock: %s\n", stock->symbol);
+//     printf("Retrieved %d data points for %s.\n", stock->dataSize, stock->symbol);
     
-    /* Calculate technical indicators */
-    ExtendedTechnicalIndicators* indicators = (ExtendedTechnicalIndicators*)malloc(sizeof(ExtendedTechnicalIndicators));
-    if (!indicators) {
-        printf("Error: Memory allocation failed for technical indicators\n");
-        return;
-    }
+//     /* Calculate technical indicators */
+//     ExtendedTechnicalIndicators* indicators = (ExtendedTechnicalIndicators*)malloc(sizeof(ExtendedTechnicalIndicators));
+//     if (!indicators) {
+//         printf("Error: Memory allocation failed for technical indicators\n");
+//         return;
+//     }
     
-    /* Most recent date in the stock data */
-    const char* latestDate = stock->data[stock->dataSize - 1].date;
+//     /* Most recent date in the stock data */
+//     const char* latestDate = stock->data[stock->dataSize - 1].date;
     
-    /* Calculate all extended technical indicators */
-    calculateExtendedIndicators(stock->data, stock->dataSize, indicators);
+//     /* Calculate all extended technical indicators */
+//     calculateExtendedIndicators(stock->data, stock->dataSize, indicators);
     
-    printf("\nTechnical indicators for %s (%s):\n", 
-           stock->symbol, latestDate);
-    printExtendedTechnicalIndicators(indicators);
+//     printf("\nTechnical indicators for %s (%s):\n", 
+//            stock->symbol, latestDate);
+//     printExtendedTechnicalIndicators(indicators);
     
-    free(indicators);
-}
+//     free(indicators);
+// }
 
 void printUsage(const char* programName) {
     printf("Usage: %s -k API_KEY -s SYMBOLS [options]\n\n", programName);
