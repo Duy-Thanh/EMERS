@@ -60,6 +60,19 @@ public class StockPredictGUI extends JFrame {
     private List<TradingSignal> signalsList = new ArrayList<>();
     private List<AnomalyResult> anomaliesList = new ArrayList<>();
     
+    // Add the class variables to support the above code
+    private JPanel indicatorChartPanel;
+    private JCheckBox smaCheckbox;
+    private JCheckBox emaCheckbox;
+    private JCheckBox macdCheckbox;
+    private JCheckBox rsiCheckbox;
+    private JCheckBox bollingerCheckbox;
+    private JTextField smaPeriodField;
+    private JTextField emaPeriodField;
+    private JTextField macdFastField;
+    private JTextField macdSlowField;
+    private JTextField macdSignalField;
+    
     public StockPredictGUI() {
         super("StockPredict Data Mining Results Viewer");
         initializeUI();
@@ -296,32 +309,32 @@ public class StockPredictGUI extends JFrame {
         indicatorSelectorPanel.setLayout(new BoxLayout(indicatorSelectorPanel, BoxLayout.Y_AXIS));
         
         // Add indicator checkboxes
-        JCheckBox smaCheckbox = new JCheckBox("SMA");
-        JCheckBox emaCheckbox = new JCheckBox("EMA");
-        JCheckBox macdCheckbox = new JCheckBox("MACD");
-        JCheckBox rsiCheckbox = new JCheckBox("RSI");
-        JCheckBox bollingerCheckbox = new JCheckBox("Bollinger Bands");
+        smaCheckbox = new JCheckBox("SMA");
+        emaCheckbox = new JCheckBox("EMA");
+        macdCheckbox = new JCheckBox("MACD");
+        rsiCheckbox = new JCheckBox("RSI");
+        bollingerCheckbox = new JCheckBox("Bollinger Bands");
         
         // Add input fields for parameters
         JPanel smaParamsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         smaParamsPanel.add(new JLabel("Period:"));
-        JTextField smaPeriodField = new JTextField("20", 4);
+        smaPeriodField = new JTextField("20", 4);
         smaParamsPanel.add(smaPeriodField);
         
         JPanel emaParamsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         emaParamsPanel.add(new JLabel("Period:"));
-        JTextField emaPeriodField = new JTextField("12", 4);
+        emaPeriodField = new JTextField("12", 4);
         emaParamsPanel.add(emaPeriodField);
         
         JPanel macdParamsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         macdParamsPanel.add(new JLabel("Fast:"));
-        JTextField macdFastField = new JTextField("12", 3);
+        macdFastField = new JTextField("12", 3);
         macdParamsPanel.add(macdFastField);
         macdParamsPanel.add(new JLabel("Slow:"));
-        JTextField macdSlowField = new JTextField("26", 3);
+        macdSlowField = new JTextField("26", 3);
         macdParamsPanel.add(macdSlowField);
         macdParamsPanel.add(new JLabel("Signal:"));
-        JTextField macdSignalField = new JTextField("9", 3);
+        macdSignalField = new JTextField("9", 3);
         macdParamsPanel.add(macdSignalField);
         
         indicatorSelectorPanel.add(smaCheckbox);
@@ -340,7 +353,7 @@ public class StockPredictGUI extends JFrame {
         indicatorSelectorPanel.add(refreshButton);
         
         // Right panel - chart
-        JPanel indicatorChartPanel = new JPanel(new BorderLayout());
+        indicatorChartPanel = new JPanel(new BorderLayout());
         JLabel placeholderLabel = new JLabel("Indicator chart will be displayed here", JLabel.CENTER);
         placeholderLabel.setFont(new Font("Arial", Font.BOLD, 18));
         indicatorChartPanel.add(placeholderLabel, BorderLayout.CENTER);
@@ -850,7 +863,411 @@ public class StockPredictGUI extends JFrame {
     }
     
     private void refreshIndicators() {
-        JOptionPane.showMessageDialog(this, "Refreshing indicators - This would integrate with the C codebase.");
+        if (stockDataList.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No stock data loaded. Please load data first.", 
+                "Error", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        try {
+            // Create a time series for the stock price
+            TimeSeries priceSeries = new TimeSeries("Price");
+            
+            // Create datasets for selected indicators
+            TimeSeriesCollection priceDataset = new TimeSeriesCollection();
+            priceDataset.addSeries(priceSeries);
+            
+            // Additional dataset for indicators that need their own scale (RSI, MACD)
+            TimeSeriesCollection secondaryDataset = null;
+            
+            // Add price data
+            for (StockData data : stockDataList) {
+                try {
+                    Day date = parseDateString(data.date);
+                    priceSeries.add(date, data.close);
+                } catch (Exception e) {
+                    System.err.println("Error parsing date: " + data.date + " - " + e.getMessage());
+                }
+            }
+            
+            // Check which indicators are selected and add them
+            if (smaCheckbox.isSelected()) {
+                try {
+                    int period = Integer.parseInt(smaPeriodField.getText());
+                    TimeSeries smaSeries = new TimeSeries("SMA(" + period + ")");
+                    
+                    // Calculate SMA
+                    double[] closes = new double[stockDataList.size()];
+                    for (int i = 0; i < stockDataList.size(); i++) {
+                        closes[i] = stockDataList.get(i).close;
+                    }
+                    
+                    for (int i = period - 1; i < stockDataList.size(); i++) {
+                        double sum = 0;
+                        for (int j = i - (period - 1); j <= i; j++) {
+                            sum += closes[j];
+                        }
+                        double sma = sum / period;
+                        
+                        // Add to series
+                        Day date = parseDateString(stockDataList.get(i).date);
+                        smaSeries.add(date, sma);
+                    }
+                    
+                    priceDataset.addSeries(smaSeries);
+                } catch (NumberFormatException e) {
+                    JOptionPane.showMessageDialog(this, "Invalid SMA period. Please enter a valid number.", 
+                        "Error", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+            
+            if (emaCheckbox.isSelected()) {
+                try {
+                    int period = Integer.parseInt(emaPeriodField.getText());
+                    TimeSeries emaSeries = new TimeSeries("EMA(" + period + ")");
+                    
+                    // Calculate EMA
+                    double[] closes = new double[stockDataList.size()];
+                    for (int i = 0; i < stockDataList.size(); i++) {
+                        closes[i] = stockDataList.get(i).close;
+                    }
+                    
+                    // First EMA value is SMA
+                    double sum = 0;
+                    for (int i = 0; i < period; i++) {
+                        sum += closes[i];
+                    }
+                    double ema = sum / period;
+                    
+                    // Add first EMA point
+                    Day date = parseDateString(stockDataList.get(period - 1).date);
+                    emaSeries.add(date, ema);
+                    
+                    // Calculate multiplier
+                    double multiplier = 2.0 / (period + 1);
+                    
+                    // Calculate rest of EMA values
+                    for (int i = period; i < stockDataList.size(); i++) {
+                        ema = (closes[i] - ema) * multiplier + ema;
+                        date = parseDateString(stockDataList.get(i).date);
+                        emaSeries.add(date, ema);
+                    }
+                    
+                    priceDataset.addSeries(emaSeries);
+                } catch (NumberFormatException e) {
+                    JOptionPane.showMessageDialog(this, "Invalid EMA period. Please enter a valid number.", 
+                        "Error", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+            
+            if (bollingerCheckbox.isSelected()) {
+                try {
+                    int period = 20; // Standard period
+                    double stdDevMultiplier = 2.0; // Standard deviation multiplier
+                    
+                    TimeSeries upperBandSeries = new TimeSeries("Upper Bollinger Band");
+                    TimeSeries middleBandSeries = new TimeSeries("Middle Bollinger Band");
+                    TimeSeries lowerBandSeries = new TimeSeries("Lower Bollinger Band");
+                    
+                    // Calculate Bollinger Bands
+                    double[] closes = new double[stockDataList.size()];
+                    for (int i = 0; i < stockDataList.size(); i++) {
+                        closes[i] = stockDataList.get(i).close;
+                    }
+                    
+                    for (int i = period - 1; i < stockDataList.size(); i++) {
+                        // Calculate SMA (middle band)
+                        double sum = 0;
+                        for (int j = i - (period - 1); j <= i; j++) {
+                            sum += closes[j];
+                        }
+                        double sma = sum / period;
+                        
+                        // Calculate standard deviation
+                        double sumSquaredDiff = 0;
+                        for (int j = i - (period - 1); j <= i; j++) {
+                            double diff = closes[j] - sma;
+                            sumSquaredDiff += diff * diff;
+                        }
+                        double stdDev = Math.sqrt(sumSquaredDiff / period);
+                        
+                        // Calculate upper and lower bands
+                        double upperBand = sma + (stdDevMultiplier * stdDev);
+                        double lowerBand = sma - (stdDevMultiplier * stdDev);
+                        
+                        // Add to series
+                        Day date = parseDateString(stockDataList.get(i).date);
+                        upperBandSeries.add(date, upperBand);
+                        middleBandSeries.add(date, sma);
+                        lowerBandSeries.add(date, lowerBand);
+                    }
+                    
+                    priceDataset.addSeries(upperBandSeries);
+                    priceDataset.addSeries(middleBandSeries);
+                    priceDataset.addSeries(lowerBandSeries);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(this, "Error calculating Bollinger Bands: " + e.getMessage(), 
+                        "Error", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+            
+            if (rsiCheckbox.isSelected()) {
+                try {
+                    if (secondaryDataset == null) {
+                        secondaryDataset = new TimeSeriesCollection();
+                    }
+                    
+                    int period = 14; // Standard RSI period
+                    TimeSeries rsiSeries = new TimeSeries("RSI(" + period + ")");
+                    
+                    // Extract price data
+                    double[] closes = new double[stockDataList.size()];
+                    for (int i = 0; i < stockDataList.size(); i++) {
+                        closes[i] = stockDataList.get(i).close;
+                    }
+                    
+                    if (closes.length <= period) {
+                        throw new IllegalArgumentException("Not enough data points for RSI calculation");
+                    }
+                    
+                    // Calculate gains and losses
+                    double[] gains = new double[closes.length];
+                    double[] losses = new double[closes.length];
+                    
+                    for (int i = 1; i < closes.length; i++) {
+                        double change = closes[i] - closes[i-1];
+                        if (change > 0) {
+                            gains[i] = change;
+                            losses[i] = 0;
+                        } else {
+                            gains[i] = 0;
+                            losses[i] = Math.abs(change);
+                        }
+                    }
+                    
+                    // Calculate initial averages
+                    double avgGain = 0;
+                    double avgLoss = 0;
+                    
+                    for (int i = 1; i <= period; i++) {
+                        avgGain += gains[i];
+                        avgLoss += losses[i];
+                    }
+                    
+                    avgGain /= period;
+                    avgLoss /= period;
+                    
+                    // Calculate RSI
+                    double rs = 0;
+                    double rsi = 0;
+                    
+                    if (avgLoss > 0) {
+                        rs = avgGain / avgLoss;
+                        rsi = 100 - (100 / (1 + rs));
+                    } else {
+                        rsi = 100; // No losses, RSI = 100
+                    }
+                    
+                    // Add first RSI value
+                    Day date = parseDateString(stockDataList.get(period).date);
+                    rsiSeries.add(date, rsi);
+                    
+                    // Calculate remaining RSI values
+                    for (int i = period + 1; i < closes.length; i++) {
+                        avgGain = ((avgGain * (period - 1)) + gains[i]) / period;
+                        avgLoss = ((avgLoss * (period - 1)) + losses[i]) / period;
+                        
+                        if (avgLoss > 0) {
+                            rs = avgGain / avgLoss;
+                            rsi = 100 - (100 / (1 + rs));
+                        } else {
+                            rsi = 100; // No losses, RSI = a maximum 100
+                        }
+                        
+                        date = parseDateString(stockDataList.get(i).date);
+                        rsiSeries.add(date, rsi);
+                    }
+                    
+                    secondaryDataset.addSeries(rsiSeries);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(this, "Error calculating RSI: " + e.getMessage(), 
+                        "Error", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+            
+            if (macdCheckbox.isSelected()) {
+                try {
+                    if (secondaryDataset == null) {
+                        secondaryDataset = new TimeSeriesCollection();
+                    }
+                    
+                    int fastPeriod = Integer.parseInt(macdFastField.getText());
+                    int slowPeriod = Integer.parseInt(macdSlowField.getText());
+                    int signalPeriod = Integer.parseInt(macdSignalField.getText());
+                    
+                    TimeSeries macdSeries = new TimeSeries("MACD Line");
+                    TimeSeries signalSeries = new TimeSeries("Signal Line");
+                    TimeSeries histogramSeries = new TimeSeries("Histogram");
+                    
+                    // Extract price data
+                    double[] closes = new double[stockDataList.size()];
+                    for (int i = 0; i < stockDataList.size(); i++) {
+                        closes[i] = stockDataList.get(i).close;
+                    }
+                    
+                    // Calculate fast EMA
+                    double[] fastEMA = new double[closes.length];
+                    // First value is SMA
+                    double sum = 0;
+                    for (int i = 0; i < fastPeriod && i < closes.length; i++) {
+                        sum += closes[i];
+                    }
+                    fastEMA[fastPeriod-1] = sum / fastPeriod;
+                    
+                    // Calculate fast multiplier
+                    double fastMultiplier = 2.0 / (fastPeriod + 1);
+                    
+                    // Calculate rest of fast EMA values
+                    for (int i = fastPeriod; i < closes.length; i++) {
+                        fastEMA[i] = (closes[i] - fastEMA[i-1]) * fastMultiplier + fastEMA[i-1];
+                    }
+                    
+                    // Calculate slow EMA
+                    double[] slowEMA = new double[closes.length];
+                    // First value is SMA
+                    sum = 0;
+                    for (int i = 0; i < slowPeriod && i < closes.length; i++) {
+                        sum += closes[i];
+                    }
+                    slowEMA[slowPeriod-1] = sum / slowPeriod;
+                    
+                    // Calculate slow multiplier
+                    double slowMultiplier = 2.0 / (slowPeriod + 1);
+                    
+                    // Calculate rest of slow EMA values
+                    for (int i = slowPeriod; i < closes.length; i++) {
+                        slowEMA[i] = (closes[i] - slowEMA[i-1]) * slowMultiplier + slowEMA[i-1];
+                    }
+                    
+                    // Calculate MACD Line = Fast EMA - Slow EMA
+                    double[] macdLine = new double[closes.length];
+                    for (int i = 0; i < closes.length; i++) {
+                        macdLine[i] = 0; // Initialize
+                    }
+                    
+                    // MACD line can only be calculated from the slow period onwards
+                    for (int i = slowPeriod - 1; i < closes.length; i++) {
+                        macdLine[i] = fastEMA[i] - slowEMA[i];
+                    }
+                    
+                    // Calculate Signal Line (EMA of MACD Line)
+                    double[] signalLine = new double[closes.length];
+                    for (int i = 0; i < closes.length; i++) {
+                        signalLine[i] = 0; // Initialize
+                    }
+                    
+                    // First signal value is SMA of MACD
+                    int signalStart = slowPeriod - 1 + signalPeriod - 1;
+                    if (signalStart < closes.length) {
+                        sum = 0;
+                        for (int i = slowPeriod - 1; i <= signalStart; i++) {
+                            sum += macdLine[i];
+                        }
+                        signalLine[signalStart] = sum / signalPeriod;
+                        
+                        // Calculate signal multiplier
+                        double signalMultiplier = 2.0 / (signalPeriod + 1);
+                        
+                        // Calculate rest of signal values
+                        for (int i = signalStart + 1; i < closes.length; i++) {
+                            signalLine[i] = (macdLine[i] - signalLine[i-1]) * signalMultiplier + signalLine[i-1];
+                        }
+                    }
+                    
+                    // Calculate histogram
+                    double[] histogram = new double[closes.length];
+                    for (int i = 0; i < closes.length; i++) {
+                        histogram[i] = macdLine[i] - signalLine[i];
+                    }
+                    
+                    // Add to series from where all values are available
+                    for (int i = signalStart; i < closes.length; i++) {
+                        Day date = parseDateString(stockDataList.get(i).date);
+                        macdSeries.add(date, macdLine[i]);
+                        signalSeries.add(date, signalLine[i]);
+                        histogramSeries.add(date, histogram[i]);
+                    }
+                    
+                    secondaryDataset.addSeries(macdSeries);
+                    secondaryDataset.addSeries(signalSeries);
+                    secondaryDataset.addSeries(histogramSeries);
+                } catch (NumberFormatException e) {
+                    JOptionPane.showMessageDialog(this, "Invalid MACD parameters. Please enter valid numbers.", 
+                        "Error", JOptionPane.WARNING_MESSAGE);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(this, "Error calculating MACD: " + e.getMessage(), 
+                        "Error", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+            
+            // Create the chart
+            JFreeChart chart;
+            
+            if (secondaryDataset != null && 
+                (rsiCheckbox.isSelected() || macdCheckbox.isSelected())) {
+                // Create a chart with two vertical axes for price and indicators
+                chart = ChartFactory.createTimeSeriesChart(
+                    "Technical Indicators", // title
+                    "Date",                 // x-axis label
+                    "Price",                // y-axis label
+                    priceDataset,           // primary dataset
+                    true,                   // legend
+                    true,                   // tooltips
+                    false                   // urls
+                );
+                
+                // Get the plot and add a second axis for RSI/MACD
+                org.jfree.chart.plot.XYPlot plot = chart.getXYPlot();
+                org.jfree.chart.axis.NumberAxis axis2 = new org.jfree.chart.axis.NumberAxis("Indicator Value");
+                axis2.setAutoRangeIncludesZero(false);
+                plot.setRangeAxis(1, axis2);
+                plot.setDataset(1, secondaryDataset);
+                plot.mapDatasetToRangeAxis(1, 1);
+                
+                // Add renderer for second dataset
+                org.jfree.chart.renderer.xy.XYLineAndShapeRenderer renderer2 = 
+                    new org.jfree.chart.renderer.xy.XYLineAndShapeRenderer();
+                plot.setRenderer(1, renderer2);
+            } else {
+                // Create a simple chart with just price and price-related indicators
+                chart = ChartFactory.createTimeSeriesChart(
+                    "Technical Indicators", // title
+                    "Date",                 // x-axis label
+                    "Price",                // y-axis label
+                    priceDataset,           // data
+                    true,                   // legend
+                    true,                   // tooltips
+                    false                   // urls
+                );
+            }
+            
+            // Create chart panel
+            ChartPanel chartPanel = new ChartPanel(chart);
+            chartPanel.setPreferredSize(new Dimension(800, 500));
+            chartPanel.setDomainZoomable(true);
+            chartPanel.setRangeZoomable(true);
+            
+            // Replace the placeholder in the indicator chart panel
+            indicatorChartPanel.removeAll();
+            indicatorChartPanel.add(chartPanel, BorderLayout.CENTER);
+            indicatorChartPanel.revalidate();
+            indicatorChartPanel.repaint();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error creating indicator chart: " + e.getMessage(), 
+                "Error", JOptionPane.ERROR_MESSAGE);
+        }
     }
     
     private void viewSelectedPattern() {
