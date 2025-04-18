@@ -191,13 +191,8 @@ int generateAlerts(const AlertConfig *config, const MarketEvent *events, int eve
 bool updateMarketData(const StockData *data, int dataCount);
 
 // Include subsystem headers that actually exist
-#include "event_analysis.h"
 #include "tiingo_api.h"
-#include "model_validation.h"
-#include "text_analysis.h"
 #include "error_handling.h"
-#include "event_database.h"
-#include "technical_analysis.h"
 #include "asm_optimize.h"
 
 #endif /* EMERS_H */

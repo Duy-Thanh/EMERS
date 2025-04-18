@@ -1,4 +1,4 @@
-package gui;
+package gui; // Package declaration (Khai báo gói)
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -6,12 +6,21 @@ import java.util.List;
 import java.util.Arrays;
 
 /**
- * DataMining - Java implementation of data mining algorithms
- * Migrated from the C-based implementation to facilitate integration with GUI
+ * DataMining - Implementation of stock data analysis algorithms
+ * DataMining - Hiện thực các thuật toán phân tích dữ liệu chứng khoán
+ * 
+ * This class contains algorithms for technical analysis, pattern recognition,
+ * and anomaly detection in stock price data. It provides tools for identifying
+ * trading opportunities based on price movements and statistical indicators.
+ * 
+ * Lớp này chứa các thuật toán cho phân tích kỹ thuật, nhận dạng mẫu hình,
+ * và phát hiện bất thường trong dữ liệu giá cổ phiếu. Nó cung cấp các công cụ
+ * để xác định cơ hội giao dịch dựa trên biến động giá và các chỉ báo thống kê.
  */
-public class DataMining {
+public class DataMining { // Class definition (Định nghĩa lớp)
     
-    // Pattern types for price pattern recognition
+    // Pattern Types - Pattern detection constants
+    // Các loại mẫu hình - Hằng số phát hiện mẫu hình
     public static final int PATTERN_UNKNOWN = 0;
     public static final int PATTERN_SUPPORT = 1;
     public static final int PATTERN_RESISTANCE = 2;
