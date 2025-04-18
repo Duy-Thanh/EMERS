@@ -40,6 +40,44 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     public static final int SIGNAL_HOLD = 3;
     public static final int SIGNAL_STOP_LOSS = 4;
     
+    /**
+     * MACDResult - Container for MACD calculation results
+     * MACDResult - Lớp chứa kết quả tính toán MACD
+     * 
+     * Stores the three main components of the MACD indicator:
+     * 1. MACD Line - The difference between fast and slow EMAs
+     * 2. Signal Line - EMA of the MACD Line
+     * 3. Histogram - Difference between MACD Line and Signal Line
+     * 
+     * Lưu trữ ba thành phần chính của chỉ báo MACD:
+     * 1. Đường MACD - Sự chênh lệch giữa EMA nhanh và EMA chậm
+     * 2. Đường tín hiệu - EMA của đường MACD
+     * 3. Histogram - Sự chênh lệch giữa đường MACD và đường tín hiệu
+     */
+    public static class MACDResult {
+        public double[] macdLine;    // MACD Line values
+        public double[] signalLine;  // Signal Line values
+        public double[] histogram;   // Histogram values
+        
+        /**
+         * Constructor initializes arrays for MACD results
+         * @param length Length of data arrays
+         */
+        public MACDResult(int length) {
+            macdLine = new double[length];
+            signalLine = new double[length];
+            histogram = new double[length];
+        }
+        
+        /**
+         * Get MACD Line values only (used in divergence detection)
+         * @return MACD Line values as array
+         */
+        public double[] getLine() {
+            return macdLine;
+        }
+    }
+    
     // Using shared data classes from DataUtils
     
     /**
@@ -343,19 +381,22 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     }
     
     /**
-     * Calculate Simple Moving Average
+     * Calculate Simple Moving Average (SMA) for the given data and period
+     * Tính giá trị trung bình động đơn giản (SMA) cho dữ liệu và kỳ hạn đã cho
      * 
      * Algorithm:
-     * 1. Iterate through each data point
-     * 2. For each point, calculate the average of the previous 'period' points
-     * 3. For early points (where we don't have enough history), use available data
+     * 1. For each point, sum the closing prices of the previous 'period' days
+     * 2. Divide the sum by the period to get the average
+     * 3. For points with index < period, use available data points only
      * 
-     * Formula:
-     *   SMA(t) = (Price(t) + Price(t-1) + ... + Price(t-period+1)) / period
+     * Thuật toán:
+     * 1. Với mỗi điểm, tính tổng giá đóng cửa của 'period' ngày trước đó
+     * 2. Chia tổng cho kỳ hạn để có giá trị trung bình
+     * 3. Đối với các điểm có chỉ số < kỳ hạn, chỉ sử dụng các điểm dữ liệu có sẵn
      * 
-     * @param data Array of stock data points
-     * @param period Number of days to include in the moving average (e.g., 20 for 20-day SMA)
-     * @return Array of SMA values corresponding to each data point
+     * @param data Array of stock data (Mảng dữ liệu chứng khoán)
+     * @param period Number of days to average (Số ngày để tính trung bình)
+     * @return Array of SMA values (Mảng các giá trị SMA)
      */
     public static double[] calculateSMA(DataUtils.StockData[] data, int period) {
         double[] result = new double[data.length];
@@ -382,7 +423,37 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     }
     
     /**
-     * Helper method to detect head and shoulders pattern
+     * Detect Head and Shoulders pattern in stock price data
+     * Phát hiện mẫu hình Đầu và Vai trong dữ liệu giá cổ phiếu
+     * 
+     * Algorithm:
+     * 1. Scan for potential head points (local maxima)
+     * 2. For each potential head, look for left and right shoulders (lower peaks)
+     * 3. Validate that shoulders are roughly at the same height
+     * 4. Find the neckline by connecting lowest points between peaks
+     * 5. Calculate expected price move based on the pattern height
+     * 
+     * Thuật toán:
+     * 1. Quét các điểm tiềm năng làm đầu (các đỉnh cục bộ)
+     * 2. Với mỗi đầu tiềm năng, tìm vai trái và vai phải (các đỉnh thấp hơn)
+     * 3. Xác nhận rằng các vai xấp xỉ cùng độ cao
+     * 4. Tìm đường cổ bằng cách nối các điểm thấp nhất giữa các đỉnh
+     * 5. Tính toán biến động giá dự kiến dựa trên chiều cao của mẫu hình
+     * 
+     * Pattern characteristics:
+     * - Requires 5 key points: left shoulder, neckline1, head, neckline2, right shoulder
+     * - Head must be higher than both shoulders
+     * - Shoulders should be similar in height (within 10% of each other)
+     * - Expected price move is typically proportional to the head-to-neckline distance
+     * 
+     * Đặc điểm mẫu hình:
+     * - Cần 5 điểm chính: vai trái, cổ1, đầu, cổ2, vai phải
+     * - Đầu phải cao hơn cả hai vai
+     * - Các vai nên có độ cao tương tự (trong khoảng 10% so với nhau)
+     * - Biến động giá dự kiến thường tỷ lệ thuận với khoảng cách từ đầu đến đường cổ
+     * 
+     * @param data Array of stock data points (Mảng các điểm dữ liệu chứng khoán)
+     * @param patterns List to store detected patterns (Danh sách để lưu trữ các mẫu hình đã phát hiện)
      */
     private static void detectHeadAndShouldersPattern(DataUtils.StockData[] data, List<DataUtils.PatternResult> patterns) {
         // Need at least 40 data points to detect H&S pattern
@@ -559,7 +630,39 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     }
     
     /**
-     * Calculate volatility for a range of data
+     * Calculate volatility for a range of stock data
+     * Tính độ biến động cho một khoảng dữ liệu chứng khoán
+     * 
+     * Algorithm:
+     * 1. Calculate daily returns as percentage changes between consecutive days
+     * 2. Find the mean (average) of daily returns
+     * 3. Calculate variance as the average of squared deviations from mean
+     * 4. Take the square root of variance to get standard deviation (volatility)
+     * 5. Convert to percentage for easier interpretation
+     * 
+     * Thuật toán:
+     * 1. Tính lợi nhuận hàng ngày dưới dạng tỷ lệ phần trăm thay đổi giữa các ngày liên tiếp
+     * 2. Tìm giá trị trung bình của lợi nhuận hàng ngày
+     * 3. Tính phương sai dưới dạng trung bình của độ lệch bình phương từ giá trị trung bình
+     * 4. Lấy căn bậc hai của phương sai để có độ lệch chuẩn (độ biến động)
+     * 5. Chuyển đổi thành phần trăm để dễ giải thích
+     * 
+     * Formula: Volatility = √(Σ(r_i - r_avg)² / n) * 100%
+     * Where:
+     * - r_i = daily return for day i
+     * - r_avg = average of all daily returns
+     * - n = number of days
+     * 
+     * Công thức: Độ biến động = √(Σ(r_i - r_tb)² / n) * 100%
+     * Trong đó:
+     * - r_i = lợi nhuận hàng ngày cho ngày i
+     * - r_tb = trung bình của tất cả lợi nhuận hàng ngày
+     * - n = số ngày
+     * 
+     * @param data Array of stock data (Mảng dữ liệu chứng khoán)
+     * @param startIndex Starting index for calculation (Chỉ số bắt đầu tính toán)
+     * @param endIndex Ending index for calculation (Chỉ số kết thúc tính toán)
+     * @return Volatility as a percentage (Độ biến động dưới dạng phần trăm)
      */
     private static double calculateVolatility(DataUtils.StockData[] data, int startIndex, int endIndex) {
         double sum = 0;
@@ -699,24 +802,39 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     }
     
     /**
-     * Detect SMA crossover signals
+     * Detect Simple Moving Average (SMA) crossover trading signals
+     * Phát hiện tín hiệu giao dịch khi đường SMA cắt nhau
      * 
      * Algorithm:
-     * 1. Calculate short period SMA and long period SMA
-     * 2. Iterate through the data starting from the long period
-     * 3. Detect crossovers by comparing current and previous values
-     * 4. Generate BUY signal when short SMA crosses above long SMA
-     * 5. Generate SELL signal when short SMA crosses below long SMA
-     * 6. Calculate entry price, targets, and stop-loss levels
+     * 1. Calculate short period SMA (faster moving average)
+     * 2. Calculate long period SMA (slower moving average)
+     * 3. Look for points where the two SMAs cross:
+     *    - BUY signal: Short SMA crosses above Long SMA
+     *    - SELL signal: Short SMA crosses below Long SMA
+     * 4. For each signal, calculate target price and stop loss
      * 
-     * Key crossover conditions:
-     * - BUY: shortSMA[i-1] <= longSMA[i-1] AND shortSMA[i] > longSMA[i]
-     * - SELL: shortSMA[i-1] >= longSMA[i-1] AND shortSMA[i] < longSMA[i]
+     * Thuật toán:
+     * 1. Tính SMA kỳ hạn ngắn (đường trung bình động nhanh)
+     * 2. Tính SMA kỳ hạn dài (đường trung bình động chậm)
+     * 3. Tìm kiếm các điểm mà hai đường SMA cắt nhau:
+     *    - Tín hiệu MUA: SMA ngắn cắt lên trên SMA dài
+     *    - Tín hiệu BÁN: SMA ngắn cắt xuống dưới SMA dài
+     * 4. Với mỗi tín hiệu, tính giá mục tiêu và giá dừng lỗ
      * 
-     * @param data Array of stock data points
-     * @param shortPeriod Period for short-term SMA (typically 10-20)
-     * @param longPeriod Period for long-term SMA (typically 50-200)
-     * @return Array of trading signals detected
+     * Trading strategy:
+     * - Buy signals have 5% profit target and 3% stop loss
+     * - Sell signals have 5% profit target and 3% stop loss
+     * - Risk/reward ratio is 5/3 = 1.67
+     * 
+     * Chiến lược giao dịch:
+     * - Tín hiệu mua có mục tiêu lợi nhuận 5% và dừng lỗ 3%
+     * - Tín hiệu bán có mục tiêu lợi nhuận 5% và dừng lỗ 3%
+     * - Tỷ lệ rủi ro/phần thưởng là 5/3 = 1.67
+     * 
+     * @param data Array of stock data points (Mảng các điểm dữ liệu chứng khoán)
+     * @param shortPeriod Period for short-term SMA (Kỳ hạn cho SMA ngắn hạn)
+     * @param longPeriod Period for long-term SMA (Kỳ hạn cho SMA dài hạn)
+     * @return Array of trading signals detected (Mảng các tín hiệu giao dịch đã phát hiện)
      */
     public static DataUtils.TradingSignal[] detectSMACrossoverSignals(DataUtils.StockData[] data, int shortPeriod, int longPeriod) {
         if (data == null || data.length < longPeriod + 1) {
@@ -783,20 +901,32 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     
     /**
      * Detect anomalies in the stock data
+     * Phát hiện các bất thường trong dữ liệu chứng khoán
      * 
      * Algorithm:
      * 1. Extract price and volume data into arrays
      * 2. Calculate mean and standard deviation for price changes and volume
      * 3. For each data point, calculate z-scores for price change and volume
-     * 4. Calculate anomaly score as weighted combination (70% price, 30% volume)
+     * 4. Combine z-scores with weights: price change (70%) and volume (30%)
      * 5. Flag points with anomaly score > 2.5 standard deviations
+     * 
+     * Thuật toán:
+     * 1. Trích xuất dữ liệu giá và khối lượng vào các mảng
+     * 2. Tính giá trị trung bình và độ lệch chuẩn cho biến động giá và khối lượng
+     * 3. Với mỗi điểm dữ liệu, tính điểm z-score cho biến động giá và khối lượng
+     * 4. Kết hợp các z-score với trọng số: biến động giá (70%) và khối lượng (30%)  
+     * 5. Đánh dấu các điểm có điểm bất thường > 2.5 độ lệch chuẩn
      * 
      * Formula:
      *   z-score = |value - mean| / stdDev
      *   anomalyScore = (priceChangeZScore * 0.7) + (volumeZScore * 0.3)
      * 
-     * @param data Array of stock data points
-     * @return Array of detected anomalies
+     * Công thức:
+     *   z-score = |giá trị - trung bình| / độ lệch chuẩn
+     *   điểm bất thường = (z-score biến động giá * 0.7) + (z-score khối lượng * 0.3)
+     * 
+     * @param data Array of stock data points (Mảng các điểm dữ liệu chứng khoán)
+     * @return Array of detected anomalies (Mảng các bất thường đã phát hiện)
      */
     public static DataUtils.AnomalyResult[] detectAnomalies(DataUtils.StockData[] data) {
         if (data == null || data.length < 30) {
@@ -901,7 +1031,7 @@ public class DataMining { // Class definition (Định nghĩa lớp)
         // Calculate RSI for divergence detection
         double[] rsi = calculateRSI(data, 14);
         // Calculate MACD for divergence detection
-        double[] macd = calculateMACD(data);
+        double[] macd = calculateMACD(data).getLine();
         
         for (int i = 30; i < data.length; i++) {
             // Find local price highs and lows
@@ -1113,24 +1243,36 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     }
     
     /**
-     * Calculate Relative Strength Index (RSI)
+     * Calculate Relative Strength Index (RSI) for the given data and period
+     * Tính chỉ số sức mạnh tương đối (RSI) cho dữ liệu và kỳ hạn đã cho
      * 
      * Algorithm:
-     * 1. Calculate price changes between consecutive data points
+     * 1. Calculate price changes between consecutive days
      * 2. Separate gains (price increases) and losses (price decreases)
-     * 3. Calculate initial average gain and loss over the period
-     * 4. Apply smoothing formula for subsequent points
-     * 5. Calculate RS = AvgGain/AvgLoss
-     * 6. Calculate RSI = 100 - (100 / (1 + RS))
+     * 3. Calculate average gain and average loss over the specified period
+     * 4. Calculate Relative Strength (RS) = average gain / average loss
+     * 5. Calculate RSI = 100 - (100 / (1 + RS))
      * 
-     * Formula:
-     *   RS = AvgGain / AvgLoss
-     *   RSI = 100 - (100 / (1 + RS))
-     *   For i > period: AvgGain = ((AvgGain * (period-1)) + currentGain) / period
+     * Thuật toán:
+     * 1. Tính thay đổi giá giữa các ngày liên tiếp
+     * 2. Phân tách thành mức tăng (giá tăng) và mức giảm (giá giảm)
+     * 3. Tính mức tăng trung bình và mức giảm trung bình trong kỳ hạn đã chỉ định
+     * 4. Tính sức mạnh tương đối (RS) = mức tăng trung bình / mức giảm trung bình
+     * 5. Tính RSI = 100 - (100 / (1 + RS))
      * 
-     * @param data Array of stock data points
-     * @param period RSI period (typically 14)
-     * @return Array of RSI values (0-100) corresponding to each data point
+     * Technical interpretation:
+     * - RSI > 70: Potentially overbought condition (asset may be overvalued)
+     * - RSI < 30: Potentially oversold condition (asset may be undervalued)
+     * - RSI divergence from price can signal potential reversals
+     * 
+     * Diễn giải kỹ thuật:
+     * - RSI > 70: Có thể đang mua quá mức (tài sản có thể đang được định giá quá cao)
+     * - RSI < 30: Có thể đang bán quá mức (tài sản có thể đang được định giá quá thấp)
+     * - Sự phân kỳ RSI so với giá có thể báo hiệu khả năng đảo chiều
+     * 
+     * @param data Array of stock data (Mảng dữ liệu chứng khoán)
+     * @param period Period for RSI calculation, typically 14 days (Kỳ hạn tính RSI, thường là 14 ngày)
+     * @return Array of RSI values (Mảng các giá trị RSI)
      */
     private static double[] calculateRSI(DataUtils.StockData[] data, int period) {
         double[] rsi = new double[data.length];
@@ -1191,57 +1333,144 @@ public class DataMining { // Class definition (Định nghĩa lớp)
     
     /**
      * Calculate MACD (Moving Average Convergence Divergence)
+     * Tính chỉ báo MACD (Phân kỳ và Hội tụ Trung bình Động)
      * 
      * Algorithm:
-     * 1. Calculate 12-day EMA (fast line)
-     * 2. Calculate 26-day EMA (slow line)
+     * 1. Calculate the fast EMA (typically 12-period)
+     * 2. Calculate the slow EMA (typically 26-period)
      * 3. MACD Line = Fast EMA - Slow EMA
+     * 4. Signal Line = 9-period EMA of MACD Line
+     * 5. Histogram = MACD Line - Signal Line
      * 
-     * Formula:
-     *   MACD Line = EMA(12) - EMA(26)
+     * Thuật toán:
+     * 1. Tính EMA nhanh (thường là 12 kỳ)
+     * 2. Tính EMA chậm (thường là 26 kỳ)
+     * 3. Đường MACD = EMA nhanh - EMA chậm
+     * 4. Đường tín hiệu = EMA 9 kỳ của đường MACD
+     * 5. Histogram = Đường MACD - Đường tín hiệu
      * 
-     * Note: This implementation returns only the MACD line.
-     * A complete MACD typically includes:
-     * - MACD Line: EMA(12) - EMA(26)
-     * - Signal Line: 9-day EMA of MACD Line
-     * - Histogram: MACD Line - Signal Line
+     * Technical interpretation:
+     * - MACD line crossing above signal line: Bullish signal
+     * - MACD line crossing below signal line: Bearish signal
+     * - MACD line crossing zero from below: Strong bullish signal
+     * - MACD line crossing zero from above: Strong bearish signal
+     * - Divergence between MACD and price: Potential reversal
      * 
-     * @param data Array of stock data points
-     * @return Array of MACD line values
+     * Diễn giải kỹ thuật:
+     * - Đường MACD cắt lên trên đường tín hiệu: Tín hiệu tăng giá
+     * - Đường MACD cắt xuống dưới đường tín hiệu: Tín hiệu giảm giá
+     * - Đường MACD cắt lên trên mức 0: Tín hiệu tăng giá mạnh
+     * - Đường MACD cắt xuống dưới mức 0: Tín hiệu giảm giá mạnh
+     * - Phân kỳ giữa MACD và giá: Khả năng đảo chiều
+     * 
+     * @param data Array of stock data points (Mảng các điểm dữ liệu chứng khoán)
+     * @return MACDResult object containing MACD line, signal line, and histogram values
+     *         (Đối tượng MACDResult chứa các giá trị đường MACD, đường tín hiệu và histogram)
      */
-    private static double[] calculateMACD(DataUtils.StockData[] data) {
-        double[] macd = new double[data.length];
-        Arrays.fill(macd, 0); // Default value
-        
-        if (data.length < 26) return macd;
-        
-        // Calculate EMAs
-        double[] ema12 = calculateEMA(data, 12);
-        double[] ema26 = calculateEMA(data, 26);
-        
-        // Calculate MACD line (12-day EMA - 26-day EMA)
-        for (int i = 26; i < data.length; i++) {
-            macd[i] = ema12[i] - ema26[i];
-        }
-        
-        return macd;
+    public static MACDResult calculateMACD(DataUtils.StockData[] data) {
+        // Default MACD parameters: 12-day EMA, 26-day EMA, 9-day signal
+        // Tham số MACD mặc định: EMA 12 ngày, EMA 26 ngày, tín hiệu 9 ngày
+        return calculateMACD(data, 12, 26, 9);
     }
     
     /**
-     * Calculate Exponential Moving Average (EMA)
+     * Calculate MACD with custom parameters
+     * Tính MACD với các tham số tùy chỉnh
+     * 
+     * @param data Array of stock data points (Mảng các điểm dữ liệu chứng khoán)
+     * @param fastPeriod Period for fast EMA (Kỳ hạn cho EMA nhanh)
+     * @param slowPeriod Period for slow EMA (Kỳ hạn cho EMA chậm)
+     * @param signalPeriod Period for signal line EMA (Kỳ hạn cho EMA đường tín hiệu)
+     * @return MACDResult object containing the calculation results (Đối tượng MACDResult chứa kết quả tính toán)
+     */
+    public static MACDResult calculateMACD(DataUtils.StockData[] data, int fastPeriod, int slowPeriod, int signalPeriod) {
+        MACDResult result = new MACDResult(data.length);
+        
+        // 1. Calculate fast and slow EMAs
+        // 1. Tính EMA nhanh và EMA chậm
+        double[] fastEMA = calculateEMA(data, fastPeriod);
+        double[] slowEMA = calculateEMA(data, slowPeriod);
+        
+        // 2. Calculate MACD line (fast EMA - slow EMA)
+        // 2. Tính đường MACD (EMA nhanh - EMA chậm)
+        double[] macdLine = new double[data.length];
+        for (int i = 0; i < data.length; i++) {
+            macdLine[i] = fastEMA[i] - slowEMA[i];
+            result.macdLine[i] = macdLine[i];
+        }
+        
+        // 3. Calculate signal line (9-period EMA of MACD line)
+        // 3. Tính đường tín hiệu (EMA 9 kỳ của đường MACD)
+        // For signal line calculation, we need to create a synthetic array of data objects
+        // Để tính đường tín hiệu, chúng ta cần tạo một mảng dữ liệu tổng hợp
+        DataUtils.StockData[] macdData = new DataUtils.StockData[data.length];
+        for (int i = 0; i < data.length; i++) {
+            macdData[i] = new DataUtils.StockData();
+            macdData[i].close = macdLine[i];
+        }
+        
+        double[] signalLine = calculateEMA(macdData, signalPeriod);
+        
+        // 4. Calculate histogram (MACD line - Signal line)
+        // 4. Tính histogram (Đường MACD - Đường tín hiệu)
+        for (int i = 0; i < data.length; i++) {
+            result.signalLine[i] = signalLine[i];
+            result.histogram[i] = macdLine[i] - signalLine[i];
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Calculate EMA (Exponential Moving Average)
+     * Tính chỉ báo EMA (Trung bình Động Mũ)
      * 
      * Algorithm:
-     * 1. Calculate initial SMA for the first EMA value
-     * 2. Calculate multiplier: 2/(period+1)
-     * 3. For each subsequent point, apply EMA formula
+     * 1. Calculate initial SMA (Simple Moving Average) for the first EMA value
+     * 2. Calculate the EMA multiplier: 2/(period+1)
+     * 3. For each subsequent point, apply the EMA formula
+     * 
+     * Thuật toán:
+     * 1. Tính SMA (Trung bình Động Đơn giản) ban đầu cho giá trị EMA đầu tiên
+     * 2. Tính hệ số nhân EMA: 2/(kỳ hạn+1)
+     * 3. Cho mỗi điểm tiếp theo, áp dụng công thức EMA
      * 
      * Formula:
-     *   EMA(today) = (Price(today) - EMA(yesterday)) * multiplier + EMA(yesterday)
-     *   where multiplier = 2/(period+1)
+     *   EMA = (Close - Previous EMA) * Multiplier + Previous EMA
+     *   Multiplier = 2 / (Period + 1)
      * 
-     * @param data Array of stock data points
-     * @param period EMA period (e.g., 12 for 12-day EMA)
-     * @return Array of EMA values corresponding to each data point
+     * Công thức:
+     *   EMA = (Giá đóng cửa - EMA trước đó) * Hệ số + EMA trước đó
+     *   Hệ số = 2 / (Kỳ hạn + 1)
+     * 
+     * The EMA gives more weight to recent prices compared to SMA.
+     * EMA đặt trọng số cao hơn cho giá gần đây so với SMA.
+     * 
+     * Mathematical explanation:
+     * - The multiplier (2/(period+1)) determines how much weight to give the most recent price.
+     * - A shorter period results in a larger multiplier, making the EMA more responsive to recent price changes.
+     * - A longer period results in a smaller multiplier, making the EMA smoother and less responsive.
+     * 
+     * Giải thích toán học:
+     * - Hệ số nhân (2/(kỳ hạn+1)) xác định mức độ ảnh hưởng của giá mới nhất.
+     * - Kỳ hạn ngắn hơn dẫn đến hệ số lớn hơn, làm cho EMA phản ứng nhanh hơn với biến động giá gần đây.
+     * - Kỳ hạn dài hơn dẫn đến hệ số nhỏ hơn, làm cho EMA mượt hơn và ít phản ứng hơn.
+     * 
+     * Technical interpretation:
+     * - EMA crossing price from below: Potential bullish signal
+     * - EMA crossing price from above: Potential bearish signal
+     * - Short-term EMA crossing above long-term EMA: Bullish crossover
+     * - Short-term EMA crossing below long-term EMA: Bearish crossover
+     * 
+     * Diễn giải kỹ thuật:
+     * - EMA cắt giá từ dưới lên: Tín hiệu tăng giá tiềm năng
+     * - EMA cắt giá từ trên xuống: Tín hiệu giảm giá tiềm năng
+     * - EMA ngắn hạn cắt lên trên EMA dài hạn: Giao cắt tăng giá
+     * - EMA ngắn hạn cắt xuống dưới EMA dài hạn: Giao cắt giảm giá
+     * 
+     * @param data Array of stock data points (Mảng các điểm dữ liệu chứng khoán)
+     * @param period EMA period (e.g., 12 for 12-day EMA) (Kỳ hạn EMA, ví dụ: 12 cho EMA 12 ngày)
+     * @return Array of EMA values corresponding to each data point (Mảng các giá trị EMA tương ứng với mỗi điểm dữ liệu)
      */
     private static double[] calculateEMA(DataUtils.StockData[] data, int period) {
         double[] ema = new double[data.length];
@@ -1250,16 +1479,21 @@ public class DataMining { // Class definition (Định nghĩa lớp)
         if (data.length <= period) return ema;
         
         // Calculate initial SMA for the first EMA value
+        // Tính SMA ban đầu cho giá trị EMA đầu tiên
         double sum = 0;
         for (int i = 0; i < period; i++) {
             sum += data[i].close;
         }
         ema[period - 1] = sum / period;
         
-        // Calculate multiplier
+        // Calculate multiplier: 2/(period+1)
+        // Tính hệ số nhân: 2/(kỳ hạn+1)
         double multiplier = 2.0 / (period + 1);
         
-        // Calculate EMA values
+        // Calculate EMA values for each subsequent point using the formula:
+        // EMA = (Current Price - Previous EMA) * Multiplier + Previous EMA
+        // Tính giá trị EMA cho mỗi điểm tiếp theo sử dụng công thức:
+        // EMA = (Giá hiện tại - EMA trước đó) * Hệ số + EMA trước đó
         for (int i = period; i < data.length; i++) {
             ema[i] = (data[i].close - ema[i-1]) * multiplier + ema[i-1];
         }
