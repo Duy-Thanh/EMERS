@@ -7,7 +7,6 @@
 #define TIINGO_API_H
 
 #include "emers.h"
-#include "event_database.h"
 
 /* Tiingo API buffer sizes - don't redefine macros from emers.h */
 #define MAX_BUFFER_SIZE     4096
