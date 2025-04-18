@@ -42,14 +42,11 @@ public class DataMining {
         // Initialize with larger capacity for more aggressive detection
         List<DataUtils.PatternResult> patterns = new ArrayList<>(data.length / 10);
         
-        detectHeadAndShouldersPatterns(data, patterns);
-        detectDoubleBottomPatterns(data, patterns);
-        detectDoubleTopPatterns(data, patterns);
-        detectTrianglePatterns(data, patterns);
-        detectFlagPatterns(data, patterns);
-        detectSupportResistanceZones(data, patterns);
+        // Only call methods that are actually implemented
+        detectHeadAndShouldersPattern(data, patterns);
+        detectSupportResistanceLevels(data, patterns);
         detectTrendChanges(data, patterns);
-        detectDivergencePatterns(data, patterns); // Added divergence detection
+        detectDivergencePatterns(data, patterns);
         detectPatternsInFutureData(data, patterns);
         
         // Sort patterns by index
@@ -1161,54 +1158,5 @@ public class DataMining {
         }
         
         return ema;
-    }
-    
-    /**
-     * Check if a point in an array is a relative maximum
-     * 
-     * A relative maximum is a point where the value is greater than or equal to
-     * all other values within the specified range on both sides.
-     * 
-     * Unlike isLocalMaximum which checks the high price, this method checks
-     * an arbitrary array of values (like RSI, MACD, etc.).
-     */
-    private static boolean isRelativeMaximum(double[] values, int index, int range) {
-        if (index < range || index >= values.length - range) return false;
-        
-        double value = values[index];
-        for (int i = index - range; i <= index + range; i++) {
-            if (i != index && values[i] > value) {
-                System.out.println("DEBUG: Not a relative maximum at index " + index + " because values[" + i + "] = " + 
-                                  values[i] + " > value = " + value);
-                return false;
-            }
-        }
-        System.out.println("DEBUG: Found relative maximum at index " + index + " with value = " + value);
-        return true;
-    }
-    
-    /**
-     * Check if a point in stock data is a relative maximum based on closing price
-     * 
-     * A relative maximum is a point where the close price is greater than or equal to
-     * all other close prices within the specified range on both sides.
-     * 
-     * Unlike isLocalMaximum which checks the high price, this method checks the close price.
-     */
-    private static boolean isRelativeMaximum(DataUtils.StockData[] data, int index, int range) {
-        if (index < range || index >= data.length - range) return false;
-        
-        double close = data[index].close;
-        for (int i = index - range; i <= index + range; i++) {
-            if (i != index && data[i].close > close) {
-                System.out.println("DEBUG: Not a relative maximum at index " + index + " (" + data[index].date + 
-                                  ") because close[" + i + "] = " + data[i].close + 
-                                  " > close = " + close);
-                return false;
-            }
-        }
-        System.out.println("DEBUG: Found relative maximum at index " + index + " (" + data[index].date + 
-                          ") with close = " + close);
-        return true;
     }
 } 
