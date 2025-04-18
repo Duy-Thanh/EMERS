@@ -35,6 +35,16 @@ public class DataMining {
     
     /**
      * Detect patterns in the provided data
+     * 
+     * Algorithm:
+     * 1. Checks for minimum data requirement (at least 50 data points)
+     * 2. Creates a list to store detected patterns
+     * 3. Calls specialized detection methods for different pattern types
+     * 4. Sorts patterns by start index (chronological order)
+     * 5. Converts list to array for return
+     * 
+     * @param data Array of stock data points with price and volume information
+     * @return Array of detected price patterns, sorted chronologically
      */
     public static DataUtils.PatternResult[] detectPricePatterns(DataUtils.StockData[] data) {
         if (data == null || data.length < 50) return new DataUtils.PatternResult[0];
@@ -325,6 +335,18 @@ public class DataMining {
     
     /**
      * Calculate Simple Moving Average
+     * 
+     * Algorithm:
+     * 1. Iterate through each data point
+     * 2. For each point, calculate the average of the previous 'period' points
+     * 3. For early points (where we don't have enough history), use available data
+     * 
+     * Formula:
+     *   SMA(t) = (Price(t) + Price(t-1) + ... + Price(t-period+1)) / period
+     * 
+     * @param data Array of stock data points
+     * @param period Number of days to include in the moving average (e.g., 20 for 20-day SMA)
+     * @return Array of SMA values corresponding to each data point
      */
     public static double[] calculateSMA(DataUtils.StockData[] data, int period) {
         double[] result = new double[data.length];
@@ -670,10 +692,22 @@ public class DataMining {
     /**
      * Detect SMA crossover signals
      * 
-     * @param data Array of StockData objects
-     * @param shortPeriod Short period for SMA calculation
-     * @param longPeriod Long period for SMA calculation
-     * @return Array of trading signals
+     * Algorithm:
+     * 1. Calculate short period SMA and long period SMA
+     * 2. Iterate through the data starting from the long period
+     * 3. Detect crossovers by comparing current and previous values
+     * 4. Generate BUY signal when short SMA crosses above long SMA
+     * 5. Generate SELL signal when short SMA crosses below long SMA
+     * 6. Calculate entry price, targets, and stop-loss levels
+     * 
+     * Key crossover conditions:
+     * - BUY: shortSMA[i-1] <= longSMA[i-1] AND shortSMA[i] > longSMA[i]
+     * - SELL: shortSMA[i-1] >= longSMA[i-1] AND shortSMA[i] < longSMA[i]
+     * 
+     * @param data Array of stock data points
+     * @param shortPeriod Period for short-term SMA (typically 10-20)
+     * @param longPeriod Period for long-term SMA (typically 50-200)
+     * @return Array of trading signals detected
      */
     public static DataUtils.TradingSignal[] detectSMACrossoverSignals(DataUtils.StockData[] data, int shortPeriod, int longPeriod) {
         if (data == null || data.length < longPeriod + 1) {
@@ -741,7 +775,18 @@ public class DataMining {
     /**
      * Detect anomalies in the stock data
      * 
-     * @param data Stock data array
+     * Algorithm:
+     * 1. Extract price and volume data into arrays
+     * 2. Calculate mean and standard deviation for price changes and volume
+     * 3. For each data point, calculate z-scores for price change and volume
+     * 4. Calculate anomaly score as weighted combination (70% price, 30% volume)
+     * 5. Flag points with anomaly score > 2.5 standard deviations
+     * 
+     * Formula:
+     *   z-score = |value - mean| / stdDev
+     *   anomalyScore = (priceChangeZScore * 0.7) + (volumeZScore * 0.3)
+     * 
+     * @param data Array of stock data points
      * @return Array of detected anomalies
      */
     public static DataUtils.AnomalyResult[] detectAnomalies(DataUtils.StockData[] data) {
@@ -1060,6 +1105,23 @@ public class DataMining {
     
     /**
      * Calculate Relative Strength Index (RSI)
+     * 
+     * Algorithm:
+     * 1. Calculate price changes between consecutive data points
+     * 2. Separate gains (price increases) and losses (price decreases)
+     * 3. Calculate initial average gain and loss over the period
+     * 4. Apply smoothing formula for subsequent points
+     * 5. Calculate RS = AvgGain/AvgLoss
+     * 6. Calculate RSI = 100 - (100 / (1 + RS))
+     * 
+     * Formula:
+     *   RS = AvgGain / AvgLoss
+     *   RSI = 100 - (100 / (1 + RS))
+     *   For i > period: AvgGain = ((AvgGain * (period-1)) + currentGain) / period
+     * 
+     * @param data Array of stock data points
+     * @param period RSI period (typically 14)
+     * @return Array of RSI values (0-100) corresponding to each data point
      */
     private static double[] calculateRSI(DataUtils.StockData[] data, int period) {
         double[] rsi = new double[data.length];
@@ -1120,6 +1182,23 @@ public class DataMining {
     
     /**
      * Calculate MACD (Moving Average Convergence Divergence)
+     * 
+     * Algorithm:
+     * 1. Calculate 12-day EMA (fast line)
+     * 2. Calculate 26-day EMA (slow line)
+     * 3. MACD Line = Fast EMA - Slow EMA
+     * 
+     * Formula:
+     *   MACD Line = EMA(12) - EMA(26)
+     * 
+     * Note: This implementation returns only the MACD line.
+     * A complete MACD typically includes:
+     * - MACD Line: EMA(12) - EMA(26)
+     * - Signal Line: 9-day EMA of MACD Line
+     * - Histogram: MACD Line - Signal Line
+     * 
+     * @param data Array of stock data points
+     * @return Array of MACD line values
      */
     private static double[] calculateMACD(DataUtils.StockData[] data) {
         double[] macd = new double[data.length];
@@ -1141,6 +1220,19 @@ public class DataMining {
     
     /**
      * Calculate Exponential Moving Average (EMA)
+     * 
+     * Algorithm:
+     * 1. Calculate initial SMA for the first EMA value
+     * 2. Calculate multiplier: 2/(period+1)
+     * 3. For each subsequent point, apply EMA formula
+     * 
+     * Formula:
+     *   EMA(today) = (Price(today) - EMA(yesterday)) * multiplier + EMA(yesterday)
+     *   where multiplier = 2/(period+1)
+     * 
+     * @param data Array of stock data points
+     * @param period EMA period (e.g., 12 for 12-day EMA)
+     * @return Array of EMA values corresponding to each data point
      */
     private static double[] calculateEMA(DataUtils.StockData[] data, int period) {
         double[] ema = new double[data.length];

@@ -21,10 +21,19 @@
 /**
  * Normalize price data using min-max scaling
  * 
- * @param data Input stock data array
- * @param dataSize Number of data points
- * @param normalizedData Output array for normalized data
- * @return 0 on success, negative on failure
+ * Algorithm:
+ * 1. Find min and max values for each dimension (open, high, low, close, volume)
+ * 2. Apply min-max normalization formula: normalized = (value - min) / (max - min)
+ * 3. This scales all values to [0,1] range
+ * 4. Handle special case when min=max (constant data) by setting to 0.5
+ * 
+ * Formula:
+ *   normalized = (value - min) / (max - min)
+ * 
+ * @param data Input stock data array containing raw price values
+ * @param dataSize Number of data points in the array
+ * @param normalizedData Output array for normalized data (must be pre-allocated)
+ * @return 0 on success, negative error code on failure
  */
 int normalizeStockData(const StockData* data, int dataSize, StockData* normalizedData) {
     if (!data || !normalizedData || dataSize <= 0) {
@@ -102,12 +111,22 @@ int normalizeStockData(const StockData* data, int dataSize, StockData* normalize
 
 /**
  * Remove outliers using z-score method
- * Points with z-score above threshold are replaced with the mean value
  * 
- * @param data Input/output stock data array
+ * Algorithm:
+ * 1. Calculate mean for each dimension (open, high, low, close, volume)
+ * 2. Calculate standard deviation for each dimension
+ * 3. Calculate z-score for each data point: z = |value - mean| / stdDev
+ * 4. Replace values where z-score > threshold with the mean
+ * 
+ * Formula:
+ *   z-score = |value - mean| / stdDev
+ *   mean = sum(values) / n
+ *   stdDev = sqrt(sum((value - mean)²) / n)
+ * 
+ * @param data Input/output stock data array (outliers will be replaced in-place)
  * @param dataSize Number of data points
  * @param threshold Z-score threshold for outlier detection (typically 3.0)
- * @return Number of outliers detected and fixed
+ * @return Number of outliers detected and fixed, or negative error code on failure
  */
 int removeOutliers(StockData* data, int dataSize, double threshold) {
     if (!data || dataSize <= 0 || threshold <= 0) {
@@ -196,12 +215,20 @@ int removeOutliers(StockData* data, int dataSize, double threshold) {
 }
 
 /**
- * Fill missing data in stock data array
- * Uses linear interpolation for missing values
+ * Fill missing data in stock data array using linear interpolation
  * 
- * @param data Input/output stock data array
+ * Algorithm:
+ * 1. Scan array for zero values (assumed to be missing)
+ * 2. For each missing value, find nearest non-zero values before and after
+ * 3. Apply linear interpolation based on position
+ * 
+ * Formula:
+ *   interpolated = prev + weight * (next - prev)
+ *   weight = (current_idx - prev_idx) / (next_idx - prev_idx)
+ * 
+ * @param data Input/output stock data array (missing values will be filled in-place)
  * @param dataSize Number of data points
- * @return Number of missing values filled
+ * @return Number of missing values filled, or negative error code on failure
  */
 int fillMissingData(StockData* data, int dataSize) {
     if (!data || dataSize <= 0) {
@@ -324,16 +351,24 @@ int fillMissingData(StockData* data, int dataSize) {
 }
 
 /**
- * Prepare input data for the data mining algorithms
- * - Removes outliers
- * - Fills missing data
- * - Normalizes data
+ * Prepare input data for the data mining algorithms - Master function
+ * 
+ * Algorithm:
+ * 1. Create temporary copy of input data
+ * 2. Fill missing values using linear interpolation
+ * 3. Remove outliers using z-score method (threshold=3.0)
+ * 4. Normalize data if requested
+ * 
+ * The function combines three preprocessing steps:
+ * - Missing data imputation
+ * - Outlier detection and removal
+ * - Optional normalization
  * 
  * @param inputData Input stock data array
  * @param inputSize Number of input data points
  * @param outputData Output prepared data array (must be pre-allocated)
- * @param shouldNormalize Whether to normalize the data
- * @return 0 on success, negative on failure
+ * @param shouldNormalize Whether to normalize the data (1=yes, 0=no)
+ * @return 0 on success, negative error code on failure
  */
 int prepareDataForMining(const StockData* inputData, int inputSize, 
                          StockData* outputData, int shouldNormalize) {
