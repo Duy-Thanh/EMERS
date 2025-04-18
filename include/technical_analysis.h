@@ -189,5 +189,6 @@ void calculateIndicatorsForDataPoint(const StockData* data, int dataSize, int da
 /* Additional analysis functions */
 double predictVolatility(const StockData* data, int dataSize, int period);
 double predictVolatilityGARCH(const StockData* data, int dataSize, int period);
+double calculateHistoricalVolatility(const StockData* data, int dataSize, int period);
 
 #endif /* TECHNICAL_ANALYSIS_H */

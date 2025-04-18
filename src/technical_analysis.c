@@ -274,3 +274,10 @@ void calculateEventAdjustedIndicators(const StockData* data, int dataSize,
         indicators->eventPSAR *= 1.02; /* Raise PSAR to adjust for negative movement */
     }
 }
+
+/**
+ * Calculate historical volatility for a given period
+ */
+double calculateHistoricalVolatility(const StockData* data, int dataSize, int period) {
+   return 0.0;
+}

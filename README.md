@@ -1,111 +1,47 @@
-# Emergency Market Event Response System (EMERS)
+# StockPredict - Stock Analysis and Trading Signals
 
-EMERS is an advanced stock market prediction and analysis platform designed to detect, quantify, and respond to major market-moving events such as policy changes, geopolitical crises, and economic shocks. Built with C and optimized with inline Assembly, EMERS provides real-time analysis and defensive strategy recommendations during periods of market turbulence.
+## Architecture Overview
 
-## Current Progress
+StockPredict is a stock analysis application with a hybrid C/Java architecture:
 
-The StockPredict platform has implemented:
-- Core data fetching from financial APIs with error handling
-- CSV caching system for historical data
-- Basic event detection and database storage
-- JSON parsing with cJSON library
-- Comprehensive price pattern recognition algorithms
-- Technical analysis indicators framework
-- Moving Average Crossover detection (SMA and EMA)
-- Bollinger Band Breakout detection
-- Price Momentum Analysis
-- Advanced anomaly detection
-- K-means clustering for market behavior analysis
-- Seasonality detection in time series
-- Data visualization for mining results
+- **C Backend**: Handles data fetching, cleaning, and preprocessing
+- **Java GUI**: Performs data mining, visualization, and user interaction
 
-## Roadmap (Data Mining Focus)
+## Key Components
 
-### Phase 1: Data Acquisition and Preprocessing ✓
-- Optimize API data fetching with improved error handling ✓
-- Implement robust CSV data caching system ✓
-- Create data validation and cleaning procedures ✓
-- Develop data normalization techniques for cross-asset comparison ✓
+### C Components
+- **Data Fetching**: Downloads stock data from financial APIs
+- **Preprocessing**: Cleans data, removes outliers, fills missing values
+- **Date/Time Handling**: ISO 8601 timestamp parsing and conversion
+- **Event Detection**: Market event monitoring and analysis
 
-### Phase 2: Pattern Recognition Enhancement ✓
-- Implement technical pattern detection algorithms ✓
-- Develop statistical validation for detected patterns ✓
-- Create visualization tools for identified patterns ✓
-- Optimize pattern detection performance ✓
+### Java Components
+- **Data Mining**: Pattern recognition, signal detection, anomaly detection
+- **GUI Interface**: Interactive charts, tables, and analysis views
+- **Visualization**: Price charts, indicators, and analysis results
+- **User Workflows**: Data loading, analysis execution, results review
 
-### Phase 3: Anomaly Detection and Event Analysis ✓
-- Enhance anomaly detection algorithms ✓
-- Improve event similarity scoring ✓
-- Develop event outcome prediction models ✓
-- Create historical event comparison framework ✓
+## Setup and Running
 
-### Phase 4: Time Series Analysis ✓
-- Implement advanced time series similarity measures ✓
-- Develop trend identification algorithms ✓
-- Create seasonality detection methods ✓
-- Optimize time series calculations ✓
+1. **Build the C Backend**:
+   ```
+   cd src
+   make
+   ```
 
-### Phase 5: Volatility Prediction ✓
-- Improve volatility models ✓
-- Implement simplified volatility models ✓
-- Develop volatility clustering detection ✓
-- Create visualization tools for volatility forecasts ✓
+2. **Run the Java GUI**:
+   ```
+   ./run_gui.bat
+   ```
 
-### Phase 6: Statistical Testing and Validation ✓
-- Implement statistical significance testing ✓
-- Develop backtesting framework for predictions ✓
-- Create cross-validation methodology ✓
-- Implement performance metrics for prediction accuracy ✓
+## Data Directory
+Stock data is stored in the `data` directory and is automatically detected by the GUI.
 
-### Phase 7: Integration and Visualization ✓
-- Optimize critical algorithms ✓
-- Integrate all data mining components ✓
-- Implement comprehensive error handling ✓
-- Create exportable results format ✓
-
-## Data Mining Components
-
-### Preprocessing
-- **Data Normalization**: Min-max scaling for price and volume data
-- **Outlier Removal**: Z-score based outlier detection and replacement
-- **Missing Data Handling**: Linear interpolation for filling missing values
-- **Data Preparation**: Unified pipeline for cleaning and preparing data for analysis
-
-### Technical Indicators
-- **Simple Moving Average**: Classic trend following indicator
-- **Exponential Moving Average**: Prioritizes recent price action
-- **Moving Average Crossovers**: Detection of trend changes via SMA/EMA crossovers
-- **Bollinger Bands**: Volatility-based bands for identifying price extremes
-- **Price Momentum**: Rate of change calculations for detecting price strength
-
-### Pattern Recognition
-- **Support/Resistance Levels**: Identification of price levels where reversals occur
-- **Trend Changes**: Detection of significant shifts in price direction
-- **Double Top/Bottom**: Classic reversal patterns indicating potential trend changes
-- **Head and Shoulders**: Complex reversal pattern with high predictive value
-
-### Anomaly Detection
-- **Statistical Anomalies**: Z-score based anomaly detection for price and volume
-- **Moving Average Deviation**: Identification of abnormal deviations from trend
-- **Combined Anomaly Scoring**: Weighted scoring system for anomaly significance
-
-### Clustering Analysis
-- **K-Means Clustering**: Grouping similar trading days based on OHLCV data
-- **Cluster Labeling**: Automatic characteristic labeling of clusters
-- **Cluster Quality Metrics**: Silhouette scores and distance measurements
-
-### Time Series Analysis
-- **Euclidean Distance**: Simple distance measure between time series
-- **Pearson Correlation**: Statistical correlation between different time series
-- **Seasonality Detection**: Identification of cyclical patterns in price data
-
-### Visualization
-- **ASCII Charts**: Text-based visualization for terminals and reports
-- **Pattern Visualization**: Visual representation of detected patterns
-- **Signal Reporting**: Detailed reports on trading signals with performance metrics
-- **Anomaly Reporting**: Visualization of detected anomalies with impact analysis
-- **Cluster Visualization**: Detailed cluster characteristics and statistics
-- **CSV Export**: Standardized export format for further analysis
+## Development Info
+- C Code: Located in `src/` and `include/` directories
+- Java GUI: Located in `src/gui/`
+- Test files: Located in `test/` directory
+- Data files: Located in `data/` directory
 
 ## License
 

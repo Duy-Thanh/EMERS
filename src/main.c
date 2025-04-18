@@ -11,26 +11,22 @@
 #include "../include/emers.h"
 #include "../include/tiingo_api.h"
 #include "../include/technical_analysis.h"
-#include "../include/event_analysis.h"
 #include "../include/error_handling.h"
-#include "../include/event_database.h"
-#include "../include/data_mining.h"
 
+#define MAX_STOCKS 100
+#define MAX_SYMBOL_LENGTH 16
 #define MAX_DETECTED_EVENTS 20
 #define DEFAULT_LOOKBACK_DAYS 3650  // 10 years of historical data (approximately)
 
 /* Function prototypes */
 void printUsage(const char* programName);
 void printStock(const Stock* stock);
-void printEvent(const EventData* event);
-void printDetailedEvent(const DetailedEventData* event);
 void printTechnicalIndicators(const TechnicalIndicators* indicators);
 void printExtendedTechnicalIndicators(const ExtendedTechnicalIndicators* indicators);
-void analyzeStock(const Stock* stock, const EventDatabase* newsEvents);
+void analyzeStock(const Stock* stock);
 
 int main(int argc, char* argv[]) {
     char apiKey[MAX_API_KEY_LENGTH] = "";
-    char marketauxApiKey[MARKETAUX_API_KEY_LENGTH] = ""; // Added for MarketAux API key
     char symbols[MAX_STOCKS][MAX_SYMBOL_LENGTH];
     int symbolCount = 0;
     char startDate[MAX_DATE_LENGTH] = "";
@@ -40,9 +36,6 @@ int main(int argc, char* argv[]) {
     /* Initialize error handling */
     initErrorHandling("emers_log.txt", LOG_DEBUG, LOG_INFO);
     
-    /* Initialize the event database */
-    initEventDatabase();
-    
     printf("Emergency Market Event Response System (EMERS)\n");
     
     /* Parse command line arguments */
@@ -51,12 +44,6 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 strncpy(apiKey, argv[i + 1], MAX_API_KEY_LENGTH - 1);
                 apiKey[MAX_API_KEY_LENGTH - 1] = '\0';
-                i++;
-            }
-        } else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--marketaux-key") == 0) {
-            if (i + 1 < argc) {
-                strncpy(marketauxApiKey, argv[i + 1], MARKETAUX_API_KEY_LENGTH - 1);
-                marketauxApiKey[MARKETAUX_API_KEY_LENGTH - 1] = '\0';
                 i++;
             }
         } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--symbols") == 0) {
@@ -82,6 +69,12 @@ int main(int argc, char* argv[]) {
                 endDate[MAX_DATE_LENGTH - 1] = '\0';
                 i++;
             }
+        } else if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "--marketaux-key") == 0) {
+            /* Skip this parameter and its value - news functionality is now in Java GUI */
+            if (i + 1 < argc) {
+                i++; /* Skip the value */
+            }
+            printf("Note: News functionality is now handled by the Java GUI. The -m parameter is ignored.\n");
         } else {
             printf("Unknown option: %s\n", argv[i]);
             printUsage(argv[0]);
@@ -116,36 +109,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    /* Set the MarketAux API key if provided */
-    if (strlen(marketauxApiKey) > 0) {
-        setMarketAuxAPIKey(marketauxApiKey);
-    }
-    
-    /* Initialize stocks and events */
+    /* Initialize stocks */
     Stock stocks[MAX_STOCKS];
-    EventDatabase newsEvents;
-    initializeEventDatabase(&newsEvents);
-    
-    /* Create a comma-separated list of symbols for API request */
-    char symbolList[MAX_STOCKS * (MAX_SYMBOL_LENGTH + 1)];
-    symbolList[0] = '\0';
-    
-    for (i = 0; i < symbolCount; i++) {
-        if (i > 0) {
-            strcat(symbolList, ",");
-        }
-        strcat(symbolList, symbols[i]);
-    }
-    
-    printf("Fetching news data for symbols: %s\n", symbolList);
-    
-    /* Fetch news feed */
-    if (fetchNewsFeed(symbolList, &newsEvents) != ERR_SUCCESS) {
-        printf("Error: Failed to fetch news data.\n");
-        return 1;
-    }
-    
-    printf("Retrieved %d news events.\n", newsEvents.eventCount);
     
     /* Process each stock */
     for (i = 0; i < symbolCount; i++) {
@@ -163,7 +128,7 @@ int main(int argc, char* argv[]) {
         printf("Retrieved %d data points for %s.\n", stocks[i].dataSize, symbols[i]);
         
         /* Analyze the stock */
-        analyzeStock(&stocks[i], &newsEvents);
+        analyzeStock(&stocks[i]);
     }
     
     /* Clean up */
@@ -171,24 +136,14 @@ int main(int argc, char* argv[]) {
         freeStock(&stocks[i]);
     }
     
-    if (newsEvents.events) {
-        free(newsEvents.events);
-    }
-    
-    /* Save events to database before exit */
-    saveEventsToDatabase(&newsEvents);
-    
-    /* Cleanup the event database */
-    cleanupEventDatabase();
-    
     /* Cleanup error handling */
     cleanupErrorHandling();
     
     return 0;
 }
 
-void analyzeStock(const Stock* stock, const EventDatabase* newsEvents) {
-    if (!stock || !newsEvents) {
+void analyzeStock(const Stock* stock) {
+    if (!stock) {
         return;
     }
     
@@ -212,184 +167,18 @@ void analyzeStock(const Stock* stock, const EventDatabase* newsEvents) {
            stock->symbol, latestDate);
     printExtendedTechnicalIndicators(indicators);
     
-    /* Detect price patterns */
-    printf("\n=== PATTERN RECOGNITION ANALYSIS ===\n");
-    PatternResult patterns[5];
-    int patternCount = detectPricePatterns(stock->data, stock->dataSize, patterns, 5);
-    if (patternCount > 0) {
-        printf("Detected %d price patterns:\n\n", patternCount);
-        for (int i = 0; i < patternCount; i++) {
-            printf("Pattern #%d: %s\n", i + 1, patterns[i].description);
-            printf("  Confidence: %.1f%%\n", patterns[i].confidence * 100.0);
-            printf("  Expected price move: %.2f%%\n", patterns[i].expectedMove * 100.0);
-            printf("  Pattern spans from index %d to %d\n\n", 
-                   patterns[i].startIndex, patterns[i].endIndex);
-        }
-    } else {
-        printf("No significant price patterns detected.\n\n");
-    }
-    
-    /* Volatility prediction */
-    printf("=== VOLATILITY PREDICTION ===\n");
-    int horizons[] = {5, 10, 30};
-    for (int i = 0; i < 3; i++) {
-        double predictedVol = predictVolatility(stock->data, stock->dataSize, horizons[i]);
-        printf("%d-day predicted volatility: %.2f%%\n", horizons[i], predictedVol * 100.0);
-    }
-    
-    /* Alternative GARCH model for longer horizon */
-    double garchVol = predictVolatilityGARCH(stock->data, stock->dataSize, 30);
-    printf("30-day GARCH volatility: %.2f%%\n\n", garchVol * 100.0);
-    
-    /* Anomaly detection */
-    printf("=== ANOMALY DETECTION ===\n");
-    double anomalyScore = calculateAnomalyScore(stock->data, stock->dataSize);
-    printf("Current anomaly score: %.2f", anomalyScore);
-    if (anomalyScore > 3.0) {
-        printf(" (SIGNIFICANT ANOMALY DETECTED)\n");
-    } else if (anomalyScore > 2.0) {
-        printf(" (Moderate anomaly)\n");
-    } else {
-        printf(" (Normal range)\n");
-    }
-    
-    int anomalyIndices[10];
-    int anomalyCount = detectAnomalies(stock->data, stock->dataSize, anomalyIndices, 10);
-    if (anomalyCount > 0) {
-        printf("Detected %d historical anomalies on dates:\n", anomalyCount);
-        for (int i = 0; i < anomalyCount; i++) {
-            int idx = anomalyIndices[i];
-            if (idx >= 0 && idx < stock->dataSize) {
-                printf("  %s: %.2f%% price change\n", 
-                       stock->data[idx].date, 
-                       (stock->data[idx].close - stock->data[idx-1].close) / stock->data[idx-1].close * 100.0);
-            }
-        }
-        printf("\n");
-    } else {
-        printf("No significant historical anomalies detected.\n\n");
-    }
-    
-    /* Detect market events */
-    EventData detectedEvents[MAX_EVENTS];
-    int numEvents = detectMarketEvents(stock, 1, newsEvents, detectedEvents);
-    
-    printf("\n=== EVENT ANALYSIS ===\n");
-    printf("Detected %d significant market events:\n\n", numEvents);
-    
-    /* Create dummy sector indices for sector analysis */
-    Stock dummySectors[10]; /* Technology, Financial, Healthcare, etc. */
-    Stock* sectorPointers[10];
-    
-    /* Initialize dummy sectors */
-    for (int i = 0; i < 10; i++) {
-        char sectorSymbol[16];
-        sprintf(sectorSymbol, "SECTOR%d", i + 1);
-        initializeStock(&dummySectors[i], sectorSymbol);
-        sectorPointers[i] = &dummySectors[i];
-    }
-    
-    /* Process each event */
-    for (int i = 0; i < numEvents; i++) {
-        printf("Event #%d:\n", i + 1);
-        
-        /* Print basic event info */
-        printf("Date: %s\n", detectedEvents[i].date);
-        printf("Title: %s\n", detectedEvents[i].title);
-        printf("Description: %s\n", detectedEvents[i].description);
-        printf("\n");
-        
-        /* Create a detailed event analysis */
-        DetailedEventData detailedEvent;
-        memset(&detailedEvent, 0, sizeof(DetailedEventData));
-        
-        /* Copy basic data */
-        detailedEvent.basicData = detectedEvents[i];
-        
-        /* Analyze the event */
-        detailedEvent.type = classifyEvent(&detectedEvents[i]);
-        detailedEvent.severity = assessEventSeverity(&detectedEvents[i], stock, 1);
-        detailedEvent.marketImpact = detectedEvents[i].impactScore / 100.0;
-        if (detectedEvents[i].sentiment < 0) {
-            detailedEvent.marketImpact = -detailedEvent.marketImpact;
-        }
-        
-        /* Calculate abnormal return and volatility change */
-        detailedEvent.abnormalReturn = calculateAbnormalReturn(stock, detectedEvents[i].date, 5);
-        detailedEvent.volatilityChange = calculateVolatilityChange(stock, detectedEvents[i].date, 5, 5);
-        
-        /* Identify affected sectors */
-        identifyAffectedSectors(&detectedEvents[i], (const Stock**)sectorPointers, 10, 
-                              detailedEvent.affectedSectors);
-        
-        /* Estimate event duration based on severity and type */
-        switch (detailedEvent.severity) {
-            case EVENT_SEVERITY_LOW: 
-                detailedEvent.durationEstimate = 1; 
-                break;
-            case EVENT_SEVERITY_MEDIUM: 
-                detailedEvent.durationEstimate = 3; 
-                break;
-            case EVENT_SEVERITY_HIGH: 
-                detailedEvent.durationEstimate = 7; 
-                break;
-            case EVENT_SEVERITY_CRITICAL: 
-                detailedEvent.durationEstimate = 14; 
-                break;
-            default: 
-                detailedEvent.durationEstimate = 1;
-        }
-        
-        /* Print detailed analysis */
-        printDetailedEvent(&detailedEvent);
-        
-        /* Find similar historical events */
-        SimilarHistoricalEvent similarEvents[MAX_SIMILAR_EVENTS];
-        int similarCount = findSimilarHistoricalEvents(&detectedEvents[i], newsEvents, similarEvents, MAX_SIMILAR_EVENTS);
-        
-        if (similarCount > 0) {
-            printf("\nSimilar Historical Events:\n");
-            for (int j = 0; j < similarCount; j++) {
-                printf("- %s (%.0f%% similar): %.2f%% price impact, %d days to recovery\n",
-                       similarEvents[j].eventData.title,
-                       similarEvents[j].similarityScore * 100.0,
-                       similarEvents[j].priceChangeAfterEvent * 100.0,
-                       similarEvents[j].daysToRecovery);
-            }
-            
-            /* Predict outcome based on similar events */
-            double predictedOutcome = predictEventOutcome(&detectedEvents[i], similarEvents, similarCount);
-            printf("\nPredicted price impact based on similar events: %.2f%%\n", predictedOutcome * 100.0);
-        }
-        
-        /* Calculate event-adjusted technical indicators */
-        printf("\nCalculating event-adjusted technical indicators based on this event...\n");
-        calculateEventAdjustedIndicators(stock->data, stock->dataSize, &detectedEvents[i], indicators);
-        printf("\nEvent-adjusted technical indicators for %s based on event impact:\n", stock->symbol);
-        printExtendedTechnicalIndicators(indicators);
-        
-        /* Generate and display defensive strategy */
-        char strategy[MAX_BUFFER_SIZE];
-        recommendDefensiveStrategy(&detailedEvent, stock, 1, strategy, MAX_BUFFER_SIZE);
-        printf("\nRecommended Strategy:\n%s\n", strategy);
-    }
-    
-    /* Clean up dummy sectors */
-    for (int i = 0; i < 10; i++) {
-        freeStock(&dummySectors[i]);
-    }
-    
     free(indicators);
 }
 
 void printUsage(const char* programName) {
-    printf("Usage: %s -k API_KEY -m MARKETAUX_KEY -s SYMBOLS [options]\n\n", programName);
+    printf("Usage: %s -k API_KEY -s SYMBOLS [options]\n\n", programName);
     printf("Options:\n");
     printf("  -k, --api-key KEY       Tiingo API key (for market data)\n");
-    printf("  -m, --marketaux-key KEY MarketAux API key (for news data)\n");
     printf("  -s, --symbols SYM1,SYM2 Comma-separated list of stock symbols\n");
     printf("  --start-date DATE       Start date (YYYY-MM-DD), default is 10 years ago\n");
     printf("  --end-date DATE         End date (YYYY-MM-DD), default is today\n");
+    printf("\nNote: News analysis and data mining are now handled by the Java GUI.\n");
+    printf("      Use run_gui.bat to access these features.\n");
 }
 
 void printStock(const Stock* stock) {
@@ -404,51 +193,6 @@ void printStock(const Stock* stock) {
         printf("  Close: %.2f\n", stock->data[stock->dataSize - 1].close);
         printf("  Volume: %.0f\n", stock->data[stock->dataSize - 1].volume);
     }
-}
-
-void printEvent(const EventData* event) {
-    printf("Date: %s\n", event->date);
-    printf("Title: %s\n", event->title);
-    printf("Description: %s\n", event->description);
-    printf("Sentiment: %.2f\n", event->sentiment);
-    printf("Impact Score: %d\n", event->impactScore);
-}
-
-void printDetailedEvent(const DetailedEventData* event) {
-    /* Print basic event data */
-    printEvent(&event->basicData);
-    
-    /* Print additional detailed information */
-    printf("Event Type: ");
-    switch (event->type) {
-        case MERGER_ACQUISITION: printf("Merger/Acquisition\n"); break;
-        case EARNINGS_REPORT: printf("Earnings Report\n"); break;
-        case CORPORATE_SCANDAL: printf("Corporate Scandal\n"); break;
-        case LEADERSHIP_CHANGE: printf("Leadership Change\n"); break;
-        case STOCK_SPLIT: printf("Stock Split\n"); break;
-        case IPO: printf("IPO\n"); break;
-        case LAYOFFS: printf("Layoffs\n"); break;
-        case PRODUCT_LAUNCH: printf("Product Launch\n"); break;
-        case PARTNERSHIP: printf("Partnership\n"); break;
-        case REGULATORY_CHANGE: printf("Regulatory Change\n"); break;
-        case UNKNOWN_EVENT: printf("Unknown\n"); break;
-        default: printf("Unknown\n");
-    }
-    
-    printf("Severity: ");
-    switch (event->severity) {
-        case EVENT_SEVERITY_LOW: printf("Low\n"); break;
-        case EVENT_SEVERITY_MEDIUM: printf("Medium\n"); break;
-        case EVENT_SEVERITY_HIGH: printf("High\n"); break;
-        case EVENT_SEVERITY_CRITICAL: printf("Critical\n"); break;
-        default: printf("Unknown\n");
-    }
-    
-    printf("Market Impact: %.2f%%\n", event->marketImpact * 100.0);
-    printf("Abnormal Return: %.2f%%\n", event->abnormalReturn * 100.0);
-    printf("Volatility Change: %.2f%%\n", event->volatilityChange * 100.0);
-    printf("Affected Sectors: %s\n", event->affectedSectors);
-    printf("Estimated Duration: %d days\n", event->durationEstimate);
 }
 
 void printTechnicalIndicators(const TechnicalIndicators* indicators) {
@@ -491,14 +235,4 @@ void printExtendedTechnicalIndicators(const ExtendedTechnicalIndicators* indicat
            indicators->stochasticK, indicators->stochasticD);
     printf("Money Flow Index: %.2f\n", indicators->mfi);
     printf("Parabolic SAR: %.2f\n\n", indicators->psar);
-    
-    /* Print event-adjusted indicators, if available */
-    if (indicators->eventADX > 0 || indicators->eventMFI > 0) {
-        printf("=== EVENT-ADJUSTED INDICATORS ===\n");
-        printf("Event-adjusted ADX: %.2f\n", indicators->eventADX);
-        printf("Event-adjusted Stochastic %%K: %.2f %%D: %.2f\n", 
-               indicators->eventStochasticK, indicators->eventStochasticD);
-        printf("Event-adjusted MFI: %.2f\n", indicators->eventMFI);
-        printf("Event-adjusted PSAR: %.2f\n", indicators->eventPSAR);
-    }
 }

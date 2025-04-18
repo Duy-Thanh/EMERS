@@ -10,8 +10,16 @@
 #include "../include/emers.h"
 #include "../include/technical_analysis.h"
 
+/* Add proper compiler-specific includes and macros */
 #ifdef _MSC_VER  /* Microsoft compiler */
 #include <intrin.h>
+#define asm __asm
+#define volatile
+#endif
+
+#ifdef __MINGW32__  /* MinGW compiler on Windows */
+#include <x86intrin.h>
+#define __ASSEMBLER__
 #endif
 
 /* Constants for performance optimization */
@@ -36,7 +44,7 @@ void asmCalculateStandardDeviationSIMD(const double* data, int dataSize, double*
     double mean = sum / dataSize;
     
     /* Use inline assembly to calculate sum of squared differences */
-#if defined(__GNUC__) && (defined(__x86_64__) || defined(_M_X64))
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(_M_X64)) && !defined(_WIN32)
     /* For GCC on x86_64 */
     double sumSquaredDiff = 0.0;
     
