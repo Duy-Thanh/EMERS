@@ -63,7 +63,8 @@ public class DataMining {
     private static void detectSupportResistanceLevels(DataUtils.StockData[] data, List<DataUtils.PatternResult> patterns) {
         // Find local minima (support) and maxima (resistance)
         // Reduced window size from 10 to 5 to capture more patterns
-        for (int i = 5; i < data.length - 5; i++) {
+        // Modified to include more recent data (reduced from -5 to -2)
+        for (int i = 5; i < data.length - 2; i++) {
             // Check for support level (local minimum)
             // Reduced window from 5 to 3 for more sensitivity
             if (isLocalMinimum(data, i, 3)) {
@@ -204,7 +205,7 @@ public class DataMining {
         
         // Look for crossovers
         // Reduced starting point from 50 to 5 to catch more early patterns
-        for (int i = 5; i < data.length - 1; i++) {
+        for (int i = 5; i < data.length; i++) {
             // SMA5 crosses above SMA10 (ultra-short term uptrend)
             if (i >= 10 && sma5[i-1] <= sma10[i-1] && sma5[i] > sma10[i]) {
                 DataUtils.PatternResult pattern = new DataUtils.PatternResult();
@@ -360,7 +361,8 @@ public class DataMining {
         
         // Scan for potential head and shoulders patterns
         // We need to find 5 points: left shoulder, neckline1, head, neckline2, right shoulder
-        for (int i = 20; i < data.length - 20; i++) {
+        // Modified to include more recent data (reduced buffer from 20 to 5)
+        for (int i = 20; i < data.length - 5; i++) {
             // Try to identify a potential head (local maximum)
             if (isLocalMaximum(data, i, 5)) {
                 double headValue = data[i].high;
@@ -453,7 +455,7 @@ public class DataMining {
         java.time.LocalDate today = java.time.LocalDate.now();
         
         // Look for future dates and analyze them more aggressively
-        for (int i = 5; i < data.length - 5; i++) {
+        for (int i = 5; i < data.length - 2; i++) {
             String dateStr = data[i].date;
             java.time.LocalDate dataDate;
             
@@ -566,7 +568,7 @@ public class DataMining {
      */
     private static void detectHeadAndShouldersFuture(DataUtils.StockData[] data, List<DataUtils.PatternResult> patterns, int startIndex) {
         // Look for local maxima as potential heads
-        for (int i = startIndex; i < data.length - 10; i++) {
+        for (int i = startIndex; i < data.length - 3; i++) {
             if (isRelativeMaximum(data, i, 3)) { // Using relaxed maximum detection
                 double headValue = data[i].high;
                 
@@ -686,7 +688,7 @@ public class DataMining {
         double[] longSMA = calculateSMA(data, longPeriod);
         
         // Look for crossovers, starting from the first valid point
-        for (int i = longPeriod; i < data.length - 1; i++) {
+        for (int i = longPeriod; i < data.length; i++) {
             // Short SMA crosses above Long SMA - bullish signal
             if (shortSMA[i-1] <= longSMA[i-1] && shortSMA[i] > longSMA[i]) {
                 DataUtils.TradingSignal signal = new DataUtils.TradingSignal();
@@ -845,7 +847,7 @@ public class DataMining {
         // Calculate MACD for divergence detection
         double[] macd = calculateMACD(data);
         
-        for (int i = 30; i < data.length - 1; i++) {
+        for (int i = 30; i < data.length; i++) {
             // Find local price highs and lows
             if (isRelativeMaximum(data, i, 5)) {
                 // Check for bearish RSI divergence (price high, RSI lower high)
